@@ -1,0 +1,11 @@
+.git
+*_test.go
+README.md
+AI_CONTEXT.md
+API.md
+CONFIGURATION.md
+DATA_MODEL.md
+DECISIONS.md
+PRD.md
+TEST_PLAN.md
+TODO.md

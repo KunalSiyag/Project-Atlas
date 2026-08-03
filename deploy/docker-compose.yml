@@ -1,0 +1,98 @@
+name: atlas
+
+services:
+  inference-gateway:
+    build:
+      context: ../services/inference-gateway
+      dockerfile: Dockerfile
+    environment:
+      ATLAS_INFERENCE_ADDR: ":8080"
+      ATLAS_INFERENCE_PROVIDER: ${ATLAS_INFERENCE_PROVIDER:-ollama}
+      ATLAS_INFERENCE_MODEL: ${ATLAS_INFERENCE_MODEL:-gemma3}
+      ATLAS_OLLAMA_URL: http://ollama:11434
+      ATLAS_INFERENCE_MAX_ATTEMPTS: ${ATLAS_INFERENCE_MAX_ATTEMPTS:-3}
+      ATLAS_DATABASE_URL: postgres://atlas:atlas-dev-password@postgres:5432/atlas?sslmode=disable
+    ports:
+      - "${INFERENCE_GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      ollama:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [atlas]
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-atlas}
+      POSTGRES_USER: ${POSTGRES_USER:-atlas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlas-dev-password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atlas} -d ${POSTGRES_DB:-atlas}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [atlas]
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [atlas]
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [atlas]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-atlas}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-atlas-dev-password}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    networks: [atlas]
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [atlas]
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  minio_data:
+  ollama_data:
+
+networks:
+  atlas:
+    driver: bridge

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/run.schema.json",
+  "title": "WorkflowRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "workspace_id", "status", "steps"],
+  "properties": {
+    "run_id": { "type": "string", "minLength": 1 },
+    "workspace_id": { "type": "string", "minLength": 1 },
+    "conversation_id": { "type": "string" },
+    "agent_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "succeeded", "failed", "cancelled", "waiting_approval"]
+    },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_id", "type", "status"],
+      "properties": {
+        "step_id": { "type": "string" },
+        "type": { "type": "string", "enum": ["model", "tool", "approval", "parallel"] },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "running", "succeeded", "failed", "cancelled", "waiting_approval"]
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tool_name": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    }
+  }
+}

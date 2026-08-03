@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/workspace.schema.json",
+  "title": "Workspace",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workspace_id", "name", "status"],
+  "properties": {
+    "workspace_id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["active", "suspended"] },
+    "owner_user_id": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" }
+  }
+}

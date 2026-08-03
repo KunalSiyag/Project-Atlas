@@ -21,9 +21,20 @@ Accepted
 
 ## Related Documents
 - [RFC Process](../rfcs/README.md)
+- [Architecture Overview](../architecture/OVERVIEW.md)
 
 ## Process
 Create an ADR when a decision has long-term architectural consequences, establishes a boundary, chooses a technology direction, or constrains future implementation.
 
 ## Index
-- [0001: Documentation-first modular monorepo](./0001-documentation-first-modular-monorepo.md)
+| ADR | Title | Status |
+|-----|-------|--------|
+| [0000](./0000-template.md) | Template | Template |
+| [0001](./0001-documentation-first-modular-monorepo.md) | Documentation-first modular monorepo | Accepted |
+| [0002](./0002-provider-independence.md) | Provider independence | Accepted |
+| [0003](./0003-architecture-style.md) | Architecture style (modular hexagonal services) | Accepted |
+| [0004](./0004-communication-protocols.md) | Communication protocols | Accepted |
+| [0005](./0005-storage-strategy.md) | Storage strategy | Accepted |
+| [0006](./0006-configuration-strategy.md) | Configuration strategy | Accepted |
+| [0007](./0007-testing-philosophy.md) | Testing philosophy | Accepted |
+| [0008](./0008-opentelemetry.md) | OpenTelemetry for observability | Accepted |

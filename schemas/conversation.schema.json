@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/conversation.schema.json",
+  "title": "Conversation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["conversation_id", "workspace_id", "status", "turns"],
+  "properties": {
+    "conversation_id": { "type": "string", "minLength": 1 },
+    "workspace_id": { "type": "string", "minLength": 1 },
+    "title": { "type": "string" },
+    "status": { "type": "string", "enum": ["open", "archived"] },
+    "agent_id": { "type": "string" },
+    "turns": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/turn" }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turn_id", "role", "created_at"],
+      "properties": {
+        "turn_id": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "assistant", "system", "tool"] },
+        "content": { "type": "string" },
+        "run_id": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}
