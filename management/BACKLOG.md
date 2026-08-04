@@ -39,12 +39,12 @@ Accepted
 13. ~~Richer LLM planner, real Redis short-term, production RAG quality~~.
 14. ~~Streaming generate~~ (SSE); ~~eval harness~~ (`tools/atlas-eval`); ~~Compose OTEL/Grafana~~ (`deploy/docker-compose.otel.yml`).
 15. ~~Context-builder ADR, Tool SDK RFC, prompt registry, eval fixture format~~.
+16. ~~Prompt registry file loader; Tool SDK refactor; LLM-as-judge eval path~~.
 
 ## Next
 - Kubernetes manifests / production hardening (M5).
-- LLM-as-judge optional eval path.
-- Prompt registry file loader implementation (design accepted).
-- Tool SDK: refactor built-ins onto explicit Tool interface.
+- Prompt hot-reload and Postgres publish path for registry.
+- Remote/WASM tool plugins.
 
 ## Later
 - Kubernetes manifests.

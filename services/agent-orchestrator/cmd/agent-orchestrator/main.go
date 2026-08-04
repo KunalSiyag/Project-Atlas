@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -66,8 +67,26 @@ func main() {
 	retriever := orchestrator.NewQdrantRetriever(qdrantURL, embedder)
 
 	gateway := orchestrator.NewHTTPGatewayClient(gatewayURL, model)
-	// Hybrid LLM planner with deterministic rule fallback.
+	// Hybrid LLM planner with deterministic rule fallback + file-backed prompts.
 	planner := orchestrator.NewLLMPlanner(gateway, model, orchestrator.NewRulePlanner())
+	promptDir := envOr("ATLAS_PROMPTS_DIR", "")
+	if promptDir == "" {
+		// default: repo prompts/ relative to cwd, or alongside binary search
+		for _, c := range []string{"prompts", filepath.Join("..", "..", "prompts"), filepath.Join("..", "prompts")} {
+			if st, err := os.Stat(c); err == nil && st.IsDir() {
+				promptDir = c
+				break
+			}
+		}
+	}
+	if promptDir != "" {
+		if reg, err := orchestrator.LoadPromptDir(promptDir); err != nil {
+			log.Printf("prompt registry unavailable (%s): %v", promptDir, err)
+		} else {
+			planner = planner.WithPrompts(reg)
+			log.Printf("prompt registry: %s", promptDir)
+		}
+	}
 	svc := orchestrator.NewService(orchestrator.ServiceConfig{
 		Store:       store,
 		Gateway:     gateway,

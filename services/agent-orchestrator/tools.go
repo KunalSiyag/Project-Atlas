@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,16 +12,61 @@ import (
 	"time"
 )
 
-// Tool is a named capability with schema validation and bounded execution.
+// Stable tool error classes (RFC 0001).
+const (
+	ToolErrInvalidInput = "invalid_input"
+	ToolErrTimeout      = "timeout"
+	ToolErrDenied       = "denied"
+	ToolErrToolError    = "tool_error"
+)
+
+// ToolError is a classified tool failure for eval and callers.
+type ToolError struct {
+	Class   string
+	Message string
+	Err     error
+}
+
+func (e *ToolError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("%s: %s", e.Class, e.Message)
+	}
+	if e.Err != nil {
+		return fmt.Sprintf("%s: %v", e.Class, e.Err)
+	}
+	return e.Class
+}
+
+func (e *ToolError) Unwrap() error { return e.Err }
+
+func toolErrorf(class, msg string, args ...any) error {
+	return &ToolError{Class: class, Message: fmt.Sprintf(msg, args...)}
+}
+
+// Tool is a named capability with schema validation and bounded execution (RFC 0001).
 type Tool interface {
 	Name() string
-	// Schema is a minimal JSON-schema-like map: required fields and types ("string","number").
-	Schema() map[string]any
-	// Dangerous tools require human approval before invoke.
-	Dangerous() bool
+	Description() string
+	// InputSchema is a JSON-Schema-like object (required, properties).
+	InputSchema() map[string]any
+	// RequiresApproval pauses the run until a human approves (dangerous tools).
+	RequiresApproval() bool
 	// Timeout for a single invocation.
 	Timeout() time.Duration
-	Invoke(ctx context.Context, input map[string]any) (string, error)
+	// Execute runs the tool after validation (callers should prefer Registry.Invoke).
+	Execute(ctx context.Context, input map[string]any) (string, error)
+}
+
+// Schema is an alias for InputSchema used by older call sites / tests.
+// Prefer InputSchema on new code.
+func ToolSchema(t Tool) map[string]any {
+	if t == nil {
+		return nil
+	}
+	return t.InputSchema()
 }
 
 // ToolRegistry maps tool name → implementation.
@@ -31,7 +77,9 @@ type ToolRegistry struct {
 func NewToolRegistry(tools ...Tool) *ToolRegistry {
 	r := &ToolRegistry{tools: make(map[string]Tool)}
 	for _, t := range tools {
-		r.tools[t.Name()] = t
+		if t != nil {
+			r.tools[t.Name()] = t
+		}
 	}
 	return r
 }
@@ -45,6 +93,21 @@ func DefaultToolRegistry() *ToolRegistry {
 	)
 }
 
+// Register adds or replaces a tool by name.
+func (r *ToolRegistry) Register(t Tool) error {
+	if r == nil {
+		return errors.New("tool registry is nil")
+	}
+	if t == nil || strings.TrimSpace(t.Name()) == "" {
+		return toolErrorf(ToolErrInvalidInput, "tool name is required")
+	}
+	if r.tools == nil {
+		r.tools = make(map[string]Tool)
+	}
+	r.tools[t.Name()] = t
+	return nil
+}
+
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	if r == nil {
 		return nil, false
@@ -53,15 +116,84 @@ func (r *ToolRegistry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
-// ValidateToolInput checks required keys and simple types from Schema().
+// List returns registered tools in arbitrary order.
+func (r *ToolRegistry) List() []Tool {
+	if r == nil {
+		return nil
+	}
+	out := make([]Tool, 0, len(r.tools))
+	for _, t := range r.tools {
+		out = append(out, t)
+	}
+	return out
+}
+
+// InvokeOptions controls Registry.Invoke.
+type InvokeOptions struct {
+	// Timeout overrides tool.Timeout when > 0.
+	Timeout time.Duration
+	// Approved must be true for tools with RequiresApproval.
+	Approved bool
+}
+
+// Invoke validates, enforces approval, applies timeout, and executes via the registry.
+func (r *ToolRegistry) Invoke(ctx context.Context, name string, input map[string]any, opts InvokeOptions) (string, error) {
+	if r == nil {
+		return "", toolErrorf(ToolErrToolError, "tool registry not configured")
+	}
+	tool, ok := r.Get(name)
+	if !ok {
+		return "", toolErrorf(ToolErrInvalidInput, "unknown tool %q", name)
+	}
+	if tool.RequiresApproval() && !opts.Approved {
+		return "", toolErrorf(ToolErrDenied, "tool %q requires approval", name)
+	}
+	if err := ValidateToolInput(tool, input); err != nil {
+		return "", &ToolError{Class: ToolErrInvalidInput, Message: err.Error(), Err: err}
+	}
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = tool.Timeout()
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	done := make(chan struct {
+		out string
+		err error
+	}, 1)
+	go func() {
+		out, err := tool.Execute(cctx, input)
+		done <- struct {
+			out string
+			err error
+		}{out, err}
+	}()
+	select {
+	case <-cctx.Done():
+		return "", &ToolError{Class: ToolErrTimeout, Message: fmt.Sprintf("tool timeout after %s", timeout), Err: cctx.Err()}
+	case res := <-done:
+		if res.err != nil {
+			var te *ToolError
+			if errors.As(res.err, &te) {
+				return "", res.err
+			}
+			return "", &ToolError{Class: ToolErrToolError, Message: res.err.Error(), Err: res.err}
+		}
+		return res.out, nil
+	}
+}
+
+// ValidateToolInput checks required keys and simple types from InputSchema().
 func ValidateToolInput(tool Tool, input map[string]any) error {
 	if input == nil {
 		input = map[string]any{}
 	}
-	schema := tool.Schema()
+	schema := tool.InputSchema()
 	required, _ := schema["required"].([]string)
 	if required == nil {
-		// also accept []any from JSON-ish maps
 		if raw, ok := schema["required"].([]any); ok {
 			for _, v := range raw {
 				if s, ok := v.(string); ok {
@@ -106,7 +238,6 @@ func checkType(want string, v any) error {
 		case float64, float32, int, int64, int32, json.Number:
 			return nil
 		default:
-			// allow numeric strings
 			if s, ok := v.(string); ok {
 				if _, err := strconv.ParseFloat(s, 64); err == nil {
 					return nil
@@ -122,44 +253,26 @@ func checkType(want string, v any) error {
 	return nil
 }
 
-// RunTool validates, applies timeout, and invokes.
+// RunTool validates, applies timeout, and executes (does not check approval).
+// Prefer ToolRegistry.Invoke for RFC-aligned call path with approval + error classes.
 func RunTool(ctx context.Context, tool Tool, input map[string]any) (string, error) {
-	if err := ValidateToolInput(tool, input); err != nil {
-		return "", err
+	if tool == nil {
+		return "", toolErrorf(ToolErrToolError, "tool is nil")
 	}
-	timeout := tool.Timeout()
-	if timeout <= 0 {
-		timeout = 5 * time.Second
-	}
-	cctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	done := make(chan struct {
-		out string
-		err error
-	}, 1)
-	go func() {
-		out, err := tool.Invoke(cctx, input)
-		done <- struct {
-			out string
-			err error
-		}{out, err}
-	}()
-	select {
-	case <-cctx.Done():
-		return "", fmt.Errorf("tool timeout after %s", timeout)
-	case res := <-done:
-		return res.out, res.err
-	}
+	// Use a transient registry to share invoke timeout/validation logic without approval gate.
+	r := NewToolRegistry(tool)
+	return r.Invoke(ctx, tool.Name(), input, InvokeOptions{Approved: true})
 }
 
-// --- mock tools ---
+// --- built-in tools ---
 
 type EchoTool struct{}
 
-func (EchoTool) Name() string { return "echo" }
-func (EchoTool) Dangerous() bool { return false }
+func (EchoTool) Name() string        { return "echo" }
+func (EchoTool) Description() string { return "Echoes the provided text unchanged" }
+func (EchoTool) RequiresApproval() bool { return false }
 func (EchoTool) Timeout() time.Duration { return 2 * time.Second }
-func (EchoTool) Schema() map[string]any {
+func (EchoTool) InputSchema() map[string]any {
 	return map[string]any{
 		"required": []string{"text"},
 		"properties": map[string]any{
@@ -167,17 +280,18 @@ func (EchoTool) Schema() map[string]any {
 		},
 	}
 }
-func (EchoTool) Invoke(_ context.Context, input map[string]any) (string, error) {
+func (EchoTool) Execute(_ context.Context, input map[string]any) (string, error) {
 	return fmt.Sprint(input["text"]), nil
 }
 
 // DangerEchoTool is a side-effect-ish mock that requires approval.
 type DangerEchoTool struct{}
 
-func (DangerEchoTool) Name() string { return "danger_echo" }
-func (DangerEchoTool) Dangerous() bool { return true }
+func (DangerEchoTool) Name() string        { return "danger_echo" }
+func (DangerEchoTool) Description() string { return "Echoes text after human approval (dangerous mock)" }
+func (DangerEchoTool) RequiresApproval() bool { return true }
 func (DangerEchoTool) Timeout() time.Duration { return 2 * time.Second }
-func (DangerEchoTool) Schema() map[string]any {
+func (DangerEchoTool) InputSchema() map[string]any {
 	return map[string]any{
 		"required": []string{"text"},
 		"properties": map[string]any{
@@ -185,16 +299,17 @@ func (DangerEchoTool) Schema() map[string]any {
 		},
 	}
 }
-func (DangerEchoTool) Invoke(_ context.Context, input map[string]any) (string, error) {
+func (DangerEchoTool) Execute(_ context.Context, input map[string]any) (string, error) {
 	return "DANGER_OK:" + fmt.Sprint(input["text"]), nil
 }
 
 type CalculatorTool struct{}
 
-func (CalculatorTool) Name() string { return "calculator" }
-func (CalculatorTool) Dangerous() bool { return false }
+func (CalculatorTool) Name() string        { return "calculator" }
+func (CalculatorTool) Description() string { return "Evaluates a simple a+b / a-b / a*b / a/b expression" }
+func (CalculatorTool) RequiresApproval() bool { return false }
 func (CalculatorTool) Timeout() time.Duration { return 2 * time.Second }
-func (CalculatorTool) Schema() map[string]any {
+func (CalculatorTool) InputSchema() map[string]any {
 	return map[string]any{
 		"required": []string{"expression"},
 		"properties": map[string]any{
@@ -202,15 +317,14 @@ func (CalculatorTool) Schema() map[string]any {
 		},
 	}
 }
-func (CalculatorTool) Invoke(_ context.Context, input map[string]any) (string, error) {
+func (CalculatorTool) Execute(_ context.Context, input map[string]any) (string, error) {
 	expr := strings.ReplaceAll(fmt.Sprint(input["expression"]), " ", "")
-	// support a+b, a-b, a*b, a/b with two numbers
 	for _, op := range []string{"+", "-", "*", "/"} {
 		if i := strings.Index(expr, op); i > 0 {
 			left, err1 := strconv.ParseFloat(expr[:i], 64)
 			right, err2 := strconv.ParseFloat(expr[i+1:], 64)
 			if err1 != nil || err2 != nil {
-				return "", fmt.Errorf("invalid expression %q", expr)
+				return "", toolErrorf(ToolErrInvalidInput, "invalid expression %q", expr)
 			}
 			var v float64
 			switch op {
@@ -222,14 +336,14 @@ func (CalculatorTool) Invoke(_ context.Context, input map[string]any) (string, e
 				v = left * right
 			case "/":
 				if right == 0 {
-					return "", fmt.Errorf("division by zero")
+					return "", toolErrorf(ToolErrInvalidInput, "division by zero")
 				}
 				v = left / right
 			}
 			return strconv.FormatFloat(v, 'f', -1, 64), nil
 		}
 	}
-	return "", fmt.Errorf("unsupported expression %q (use a+b form)", expr)
+	return "", toolErrorf(ToolErrInvalidInput, "unsupported expression %q (use a+b form)", expr)
 }
 
 // HTTPGetTool fetches a URL (http/https). Host can be constrained in production.
@@ -237,10 +351,11 @@ type HTTPGetTool struct {
 	Client *http.Client
 }
 
-func (HTTPGetTool) Name() string { return "http_get" }
-func (HTTPGetTool) Dangerous() bool { return false }
+func (HTTPGetTool) Name() string        { return "http_get" }
+func (HTTPGetTool) Description() string { return "HTTP GET a URL and return status + body (64KiB cap)" }
+func (HTTPGetTool) RequiresApproval() bool { return false }
 func (HTTPGetTool) Timeout() time.Duration { return 5 * time.Second }
-func (HTTPGetTool) Schema() map[string]any {
+func (HTTPGetTool) InputSchema() map[string]any {
 	return map[string]any{
 		"required": []string{"url"},
 		"properties": map[string]any{
@@ -248,10 +363,10 @@ func (HTTPGetTool) Schema() map[string]any {
 		},
 	}
 }
-func (t HTTPGetTool) Invoke(ctx context.Context, input map[string]any) (string, error) {
+func (t HTTPGetTool) Execute(ctx context.Context, input map[string]any) (string, error) {
 	urlStr := fmt.Sprint(input["url"])
 	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
-		return "", fmt.Errorf("url must start with http:// or https://")
+		return "", toolErrorf(ToolErrInvalidInput, "url must start with http:// or https://")
 	}
 	client := t.Client
 	if client == nil {

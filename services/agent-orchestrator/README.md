@@ -54,6 +54,7 @@ cd clients/atlas-cli && go build -o atlas .
 | `ATLAS_ORCHESTRATOR_DATABASE_URL` | empty → memory runs |
 | `ATLAS_QDRANT_URL` | `http://127.0.0.1:6333` |
 | `ATLAS_REDIS_URL` | empty → in-process short-term; `redis://host:6379/0` for Redis |
+| `ATLAS_PROMPTS_DIR` | empty → auto-discover `./prompts`; file-backed prompt registry |
 | `ATLAS_REQUIRE_WORKSPACE` | empty; `1` requires `X-Workspace-ID` |
 
 ## Tests
@@ -61,3 +62,12 @@ cd clients/atlas-cli && go build -o atlas .
 ```bash
 go test ./...
 ```
+
+## Prompt registry
+
+File-backed prompts under repo `prompts/` (see `docs/architecture/prompt-registry.md`).
+LLM planner resolves `orchestrator.plan.system` / `orchestrator.plan.user` when the registry loads.
+
+## Tool SDK
+
+Built-ins register via `Tool` / `ToolRegistry` (RFC 0001): `Description`, `InputSchema`, `RequiresApproval`, `Execute`, `Register`/`List`/`Invoke` with error classes `invalid_input`, `timeout`, `denied`, `tool_error`.

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,12 +12,65 @@ import (
 )
 
 func TestToolSchemaValidation(t *testing.T) {
-	_, err := RunTool(context.Background(), EchoTool{}, map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "required") {
-		t.Fatalf("expected schema error, got %v", err)
+	reg := DefaultToolRegistry()
+	_, err := reg.Invoke(context.Background(), "echo", map[string]any{}, InvokeOptions{Approved: true})
+	if err == nil {
+		t.Fatal("expected schema error")
 	}
-	out, err := RunTool(context.Background(), EchoTool{}, map[string]any{"text": "hi"})
+	var te *ToolError
+	if !errors.As(err, &te) || te.Class != ToolErrInvalidInput {
+		t.Fatalf("want invalid_input ToolError, got %v", err)
+	}
+	out, err := reg.Invoke(context.Background(), "echo", map[string]any{"text": "hi"}, InvokeOptions{Approved: true})
 	if err != nil || out != "hi" {
+		t.Fatalf("%q %v", out, err)
+	}
+}
+
+func TestRegistryInvokeCalculator(t *testing.T) {
+	reg := DefaultToolRegistry()
+	// Drive calculator only through shipped registry path (no reimplemented math).
+	out, err := reg.Invoke(context.Background(), "calculator", map[string]any{"expression": "21+21"}, InvokeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "42" {
+		t.Fatalf("got %q want 42 from registry calculator", out)
+	}
+	// List/register surface
+	names := map[string]bool{}
+	for _, tool := range reg.List() {
+		names[tool.Name()] = true
+		if tool.Description() == "" {
+			t.Fatalf("tool %s missing description", tool.Name())
+		}
+		if tool.InputSchema() == nil {
+			t.Fatalf("tool %s missing schema", tool.Name())
+		}
+	}
+	for _, n := range []string{"echo", "calculator", "http_get", "danger_echo"} {
+		if !names[n] {
+			t.Fatalf("missing built-in %s in List()", n)
+		}
+	}
+}
+
+func TestDangerRequiresApprovalViaRegistry(t *testing.T) {
+	reg := DefaultToolRegistry()
+	tool, ok := reg.Get("danger_echo")
+	if !ok || !tool.RequiresApproval() {
+		t.Fatal("danger_echo must require approval")
+	}
+	_, err := reg.Invoke(context.Background(), "danger_echo", map[string]any{"text": "x"}, InvokeOptions{Approved: false})
+	if err == nil {
+		t.Fatal("expected denied")
+	}
+	var te *ToolError
+	if !errors.As(err, &te) || te.Class != ToolErrDenied {
+		t.Fatalf("want denied, got %v", err)
+	}
+	out, err := reg.Invoke(context.Background(), "danger_echo", map[string]any{"text": "ship"}, InvokeOptions{Approved: true})
+	if err != nil || !strings.Contains(out, "DANGER_OK:ship") {
 		t.Fatalf("%q %v", out, err)
 	}
 }
@@ -26,20 +80,25 @@ func TestCalculatorAndTimeout(t *testing.T) {
 	if err != nil || out != "5" {
 		t.Fatalf("%q %v", out, err)
 	}
-	slow := slowTool{}
-	_, err = RunTool(context.Background(), slow, map[string]any{"text": "x"})
-	if err == nil || !strings.Contains(err.Error(), "timeout") {
-		t.Fatalf("expected timeout, got %v", err)
+	reg := NewToolRegistry(slowTool{})
+	_, err = reg.Invoke(context.Background(), "slow", map[string]any{"text": "x"}, InvokeOptions{Approved: true})
+	if err == nil {
+		t.Fatal("expected timeout")
+	}
+	var te *ToolError
+	if !errors.As(err, &te) || te.Class != ToolErrTimeout {
+		t.Fatalf("want timeout class, got %v", err)
 	}
 }
 
 type slowTool struct{}
 
-func (slowTool) Name() string                            { return "slow" }
-func (slowTool) Dangerous() bool                         { return false }
-func (slowTool) Timeout() time.Duration                  { return 20 * time.Millisecond }
-func (slowTool) Schema() map[string]any                  { return map[string]any{} }
-func (slowTool) Invoke(ctx context.Context, _ map[string]any) (string, error) {
+func (slowTool) Name() string                   { return "slow" }
+func (slowTool) Description() string            { return "slow test tool" }
+func (slowTool) RequiresApproval() bool         { return false }
+func (slowTool) Timeout() time.Duration         { return 20 * time.Millisecond }
+func (slowTool) InputSchema() map[string]any    { return map[string]any{} }
+func (slowTool) Execute(ctx context.Context, _ map[string]any) (string, error) {
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
@@ -65,7 +124,6 @@ func TestToolStepAndApprovalFlow(t *testing.T) {
 		IDFunc:  func() string { return "run-danger" },
 	})
 	ctx := context.Background()
-	// Goal triggers danger tool
 	created, err := svc.CreateRun(ctx, "please danger echo this payload")
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +153,6 @@ func TestToolStepAndApprovalFlow(t *testing.T) {
 	if run.Status != StatusSucceeded {
 		t.Fatalf("after approve want succeeded, got %s %s steps=%+v", run.Status, run.Error, run.Steps)
 	}
-	// danger tool should have produced output
 	found := false
 	for _, s := range run.Steps {
 		if s.ToolName == "danger_echo" && strings.Contains(s.Output, "DANGER_OK:") {
@@ -114,20 +171,16 @@ func TestRejectApproval(t *testing.T) {
 		IDFunc: func() string { return "run-rej" },
 	})
 	ctx := context.Background()
-	// Force a plan with only danger tool + finalize without gateway for reject path before model
-	// Use create then mutate steps
 	run, err := svc.CreateRun(ctx, "danger only")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Start may fail if no gateway on model — set plan to only prepare + danger
 	run.Steps = []Step{
 		{StepID: "prepare", Name: "p", Kind: StepKindContext, Status: StepPending, MaxAttempts: 1},
 		{StepID: "d", Name: "d", Kind: StepKindTool, DependsOn: []string{"prepare"}, Status: StepPending, MaxAttempts: 1,
 			ToolName: "danger_echo", ToolInput: map[string]any{"text": "x"}, RequiresApproval: true},
 	}
 	_ = svc.Store.SaveRun(ctx, run)
-	// Need gateway-less prepare - context doesn't need gateway
 	run, err = svc.StartRun(ctx, "run-rej")
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +202,8 @@ func TestHTTPGetTool(t *testing.T) {
 		_, _ = w.Write([]byte("pong"))
 	}))
 	defer srv.Close()
-	out, err := RunTool(context.Background(), HTTPGetTool{Client: srv.Client()}, map[string]any{"url": srv.URL})
+	reg := NewToolRegistry(HTTPGetTool{Client: srv.Client()})
+	out, err := reg.Invoke(context.Background(), "http_get", map[string]any{"url": srv.URL}, InvokeOptions{})
 	if err != nil || !strings.Contains(out, "pong") {
 		t.Fatalf("%q %v", out, err)
 	}

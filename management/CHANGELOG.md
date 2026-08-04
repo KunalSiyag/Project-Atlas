@@ -28,6 +28,7 @@ Keep a human-readable list. When versioned releases begin, adopt Keep a Changelo
 ## Unreleased
 
 ### Added
+- File-backed **prompt registry** (`prompts/`, `LoadPromptDir`) wired into LLM planner; Tool SDK RFC surface (`Register`/`List`/`Invoke`, error classes); optional **llm_judge** eval case + `-judge-stub`.
 - Hybrid **LLMPlanner** (gateway JSON plan + ValidatePlan) with **RulePlanner** fallback; Redis short-term memory (`ATLAS_REDIS_URL`); RAG chunking/ranking/score metadata.
 - Offline **eval harness** `tools/atlas-eval` + fixture format `fixtures/eval/v1/`.
 - Compose observability overlay `deploy/docker-compose.otel.yml` (OTEL collector + Grafana provisioning/dashboard).

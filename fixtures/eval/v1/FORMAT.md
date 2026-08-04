@@ -60,3 +60,11 @@ Machine-readable JSON written by the harness:
 ```
 
 `score` is `1.0` on pass and `0.0` on fail for deterministic gates.
+
+5. **`llm_judge`** — optional LLM-as-judge (requires harness `Judge` / `-judge-stub`).
+   - `input.rubric` (string), `input.candidate` (string).
+   - `expect.pass` (bool, optional): required judge verdict.
+   - `expect.min_score` (number, optional): minimum judge score.
+   - If no judge is configured, the case **fails** with `status: "error"` and message `llm_judge requires a Judge` (no panic). Deterministic suites without this type still pass with no judge.
+   - CLI: `atlas-eval -dataset ... -judge-stub pass` injects a static pass judge for offline runs.
+

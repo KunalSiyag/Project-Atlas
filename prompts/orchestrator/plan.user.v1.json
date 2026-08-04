@@ -1,0 +1,11 @@
+{
+  "id": "orchestrator.plan.user",
+  "version": "1",
+  "status": "active",
+  "model_class": "plan",
+  "approx_tokens": 80,
+  "variables": [
+    {"name": "goal", "description": "User goal text", "required": true}
+  ],
+  "text": "Return ONLY a JSON array of plan steps for the user goal.\nEach step object fields: step_id (string), name (string), kind (one of context|model|tool|finalize),\ndepends_on (array of step_id), tool_name (for tool steps), tool_input (object), max_attempts (int optional).\nInclude at least one context step, one model or tool step, and a finalize step.\nGoal: {{goal}}"
+}

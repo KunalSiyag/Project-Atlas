@@ -205,11 +205,11 @@ func (e *Executor) execTool(ctx context.Context, run Run, step *Step) (string, e
 	if !ok {
 		return "", fmt.Errorf("unknown tool %q", step.ToolName)
 	}
-	needsApproval := step.RequiresApproval || tool.Dangerous()
+	needsApproval := step.RequiresApproval || tool.RequiresApproval()
 	if needsApproval && !step.Approved {
 		return "", ErrWaitingApproval
 	}
-	return RunTool(ctx, tool, step.ToolInput)
+	return e.Tools.Invoke(ctx, step.ToolName, step.ToolInput, InvokeOptions{Approved: true})
 }
 
 func (e *Executor) execContext(ctx context.Context, run Run) (string, error) {

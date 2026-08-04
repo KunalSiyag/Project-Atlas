@@ -20,6 +20,8 @@ type LLMPlanner struct {
 	Gateway  InferenceClient
 	Model    string
 	Fallback Planner
+	// Prompts optional file-backed registry for system/user plan templates.
+	Prompts *PromptRegistry
 }
 
 // NewLLMPlanner constructs a hybrid planner. Fallback defaults to RulePlanner.
@@ -30,13 +32,21 @@ func NewLLMPlanner(gateway InferenceClient, model string, fallback Planner) *LLM
 	return &LLMPlanner{Gateway: gateway, Model: model, Fallback: fallback}
 }
 
+// WithPrompts attaches a prompt registry for plan system/user templates.
+func (p *LLMPlanner) WithPrompts(reg *PromptRegistry) *LLMPlanner {
+	if p != nil {
+		p.Prompts = reg
+	}
+	return p
+}
+
 func (p *LLMPlanner) Plan(ctx context.Context, goal string) ([]Step, error) {
 	goal = strings.TrimSpace(goal)
 	if goal == "" {
 		return nil, fmt.Errorf("goal is required")
 	}
 	if p.Gateway != nil {
-		steps, err := planFromModel(ctx, p.Gateway, p.Model, goal)
+		steps, err := planFromModel(ctx, p.Gateway, p.Model, goal, p.Prompts)
 		if err == nil {
 			if err := ValidatePlan(steps); err == nil {
 				return steps, nil
@@ -55,6 +65,7 @@ type RulePlanner struct {
 	// Gateway optional: if set and goal asks for "json plan", can call model (optional path).
 	Gateway InferenceClient
 	Model   string
+	Prompts *PromptRegistry
 }
 
 func NewRulePlanner() *RulePlanner { return &RulePlanner{} }
@@ -73,7 +84,7 @@ func (p *RulePlanner) Plan(ctx context.Context, goal string) ([]Step, error) {
 	// Optional: model JSON plan when goal starts with "plan:" (legacy path).
 	// Prefer LLMPlanner for always-on model planning with rule fallback.
 	if strings.HasPrefix(strings.ToLower(goal), "plan:") && p.Gateway != nil {
-		steps, err := planFromModel(ctx, p.Gateway, p.Model, strings.TrimSpace(goal[5:]))
+		steps, err := planFromModel(ctx, p.Gateway, p.Model, strings.TrimSpace(goal[5:]), p.Prompts)
 		if err == nil {
 			if err := ValidatePlan(steps); err != nil {
 				return nil, err
@@ -143,19 +154,26 @@ func (p *RulePlanner) Plan(ctx context.Context, goal string) ([]Step, error) {
 }
 
 // planFromModel asks the gateway for a JSON step array and normalizes defaults.
-func planFromModel(ctx context.Context, gateway InferenceClient, model, goal string) ([]Step, error) {
+// When prompts is non-nil, system/user text come from the file-backed registry.
+func planFromModel(ctx context.Context, gateway InferenceClient, model, goal string, prompts *PromptRegistry) ([]Step, error) {
 	if gateway == nil {
 		return nil, fmt.Errorf("gateway is required")
 	}
-	prompt := `Return ONLY a JSON array of plan steps for the user goal.
-Each step object fields: step_id (string), name (string), kind (one of context|model|tool|finalize),
-depends_on (array of step_id), tool_name (for tool steps), tool_input (object), max_attempts (int optional).
-Include at least one context step, one model or tool step, and a finalize step.
-Goal: ` + goal
+	vars := map[string]string{"goal": goal}
+	system := defaultPlanSystemPrompt
+	user := defaultPlanUserPrompt(goal)
+	if prompts != nil {
+		if s, _, err := prompts.ResolveAndRender(PromptPlanSystem, "", vars); err == nil && strings.TrimSpace(s) != "" {
+			system = s
+		}
+		if u, _, err := prompts.ResolveAndRender(PromptPlanUser, "", vars); err == nil && strings.TrimSpace(u) != "" {
+			user = u
+		}
+	}
 	resp, err := gateway.Generate(ctx, GenerateRequest{
 		Messages: []Message{
-			{Role: "system", Content: "You are an Atlas plan compiler. Output valid JSON array only. No prose."},
-			{Role: "user", Content: prompt},
+			{Role: "system", Content: system},
+			{Role: "user", Content: user},
 		},
 		Model:     model,
 		TaskClass: "plan",
@@ -164,6 +182,16 @@ Goal: ` + goal
 		return nil, err
 	}
 	return ParsePlanJSON(resp.Message.Content)
+}
+
+const defaultPlanSystemPrompt = "You are an Atlas plan compiler. Output valid JSON array only. No prose."
+
+func defaultPlanUserPrompt(goal string) string {
+	return `Return ONLY a JSON array of plan steps for the user goal.
+Each step object fields: step_id (string), name (string), kind (one of context|model|tool|finalize),
+depends_on (array of step_id), tool_name (for tool steps), tool_input (object), max_attempts (int optional).
+Include at least one context step, one model or tool step, and a finalize step.
+Goal: ` + goal
 }
 
 // ParsePlanJSON extracts and normalizes a step array from model output.

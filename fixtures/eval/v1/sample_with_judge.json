@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "name": "atlas-judge-mixed",
+  "description": "Deterministic string check plus optional llm_judge case",
+  "cases": [
+    {
+      "id": "string-marker",
+      "type": "string_contains",
+      "input": { "text": "atlas eval harness is online" },
+      "expect": { "contains": ["atlas eval", "online"] }
+    },
+    {
+      "id": "judge-quality",
+      "type": "llm_judge",
+      "description": "Optional LLM-as-judge against a fixed rubric",
+      "input": {
+        "rubric": "Candidate must mention Project Atlas and planning or tools.",
+        "candidate": "Project Atlas uses a plan DAG with tools and memory."
+      },
+      "expect": {
+        "pass": true,
+        "min_score": 0.5
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "orchestrator.plan.system",
+  "version": "1",
+  "status": "active",
+  "model_class": "plan",
+  "approx_tokens": 40,
+  "variables": [
+    {"name": "goal", "description": "User goal text", "required": false}
+  ],
+  "text": "ATLAS_PLAN_COMPILER_V1: You are an Atlas plan compiler. Output valid JSON array only. No prose. Prefer tools when the goal implies calculation or HTTP."
+}
