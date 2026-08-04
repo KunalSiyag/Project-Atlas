@@ -1,0 +1,79 @@
+{
+  "version": "1",
+  "name": "atlas-m1-smoke-eval",
+  "description": "Small deterministic fixture for planner + RAG ranking gates",
+  "cases": [
+    {
+      "id": "plan-calc-tool",
+      "type": "rule_plan",
+      "description": "Rule planner emits calculator for math goals",
+      "input": {
+        "goal": "calculate 12+30 for the user"
+      },
+      "expect": {
+        "has_tool": "calculator",
+        "min_steps": 4,
+        "kinds": ["context", "tool", "model", "finalize"]
+      }
+    },
+    {
+      "id": "plan-json-valid",
+      "type": "plan_json",
+      "description": "Valid model plan JSON validates",
+      "input": {
+        "plan_json": "[{\"step_id\":\"prepare\",\"name\":\"prepare_context\",\"kind\":\"context\"},{\"step_id\":\"infer\",\"name\":\"call_inference\",\"kind\":\"model\",\"depends_on\":[\"prepare\"]},{\"step_id\":\"finalize\",\"name\":\"return_answer\",\"kind\":\"finalize\",\"depends_on\":[\"infer\"]}]"
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "plan-json-invalid",
+      "type": "plan_json",
+      "description": "Cycle is rejected",
+      "input": {
+        "plan_json": "[{\"step_id\":\"a\",\"name\":\"a\",\"kind\":\"context\",\"depends_on\":[\"b\"]},{\"step_id\":\"b\",\"name\":\"b\",\"kind\":\"model\",\"depends_on\":[\"a\"]}]"
+      },
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "rag-relevant-first",
+      "type": "rag_rank",
+      "description": "Relevant Atlas doc ranks above pasta distractor",
+      "input": {
+        "query": "vector search RAG cosine knowledge chunks",
+        "top_k": 2,
+        "docs": [
+          {
+            "id": "rel",
+            "title": "Qdrant retrieval",
+            "source": "docs/rag.md",
+            "content": "Vector search ranks knowledge base chunks by cosine similarity for RAG quality."
+          },
+          {
+            "id": "dist",
+            "title": "Unrelated",
+            "source": "docs/noise.md",
+            "content": "The weather in Paris is mild in spring with occasional rain showers."
+          }
+        ]
+      },
+      "expect": {
+        "top_id": "rel"
+      }
+    },
+    {
+      "id": "string-marker",
+      "type": "string_contains",
+      "description": "Sanity string check for harness plumbing",
+      "input": {
+        "text": "atlas eval harness is online"
+      },
+      "expect": {
+        "contains": ["atlas eval", "online"]
+      }
+    }
+  ]
+}

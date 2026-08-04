@@ -17,7 +17,7 @@ Atlas Core Engineering
 Accepted
 
 ## Last Updated
-2026-08-04
+2026-08-05
 
 ## Related Documents
 - [Roadmap](./ROADMAP.md)
@@ -36,15 +36,15 @@ Accepted
 10. ~~Persist orchestrator runs (Postgres) + real plan DAG (deps/retry/cancel) + context builder~~.
 11. ~~Tool steps / approvals~~ (echo, calculator, http_get, danger_echo + approve API).
 12. ~~Dynamic rule planner + memory + first RAG path + CLI `atlas run`~~.
-13. Richer LLM planner, real Redis short-term, production RAG quality.
-14. ~~Streaming generate~~ (SSE on `POST /v1/generate`); eval harness, Compose OTEL/Grafana dashboards.
+13. ~~Richer LLM planner, real Redis short-term, production RAG quality~~.
+14. ~~Streaming generate~~ (SSE); ~~eval harness~~ (`tools/atlas-eval`); ~~Compose OTEL/Grafana~~ (`deploy/docker-compose.otel.yml`).
+15. ~~Context-builder ADR, Tool SDK RFC, prompt registry, eval fixture format~~.
 
 ## Next
-- Context builder algorithm ADR (token budgeting strategy).
-- Tool SDK interface RFC.
-- Prompt registry design.
-- Eval dataset fixture format.
-- Agent-orchestrator first implementation slice (after gateway stable).
+- Kubernetes manifests / production hardening (M5).
+- LLM-as-judge optional eval path.
+- Prompt registry file loader implementation (design accepted).
+- Tool SDK: refactor built-ins onto explicit Tool interface.
 
 ## Later
 - Kubernetes manifests.

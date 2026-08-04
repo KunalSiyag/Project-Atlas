@@ -38,6 +38,7 @@ func main() {
 
 	var mem orchestrator.MemoryStore = orchestrator.NewInMemoryMemory()
 	var pgMem *orchestrator.PostgresMemory
+	var redisMem *orchestrator.RedisShortMemory
 	if dbURL != "" {
 		m, err := orchestrator.OpenPostgresMemory(ctx, dbURL)
 		if err != nil {
@@ -48,12 +49,25 @@ func main() {
 			log.Printf("memory: postgres long-term + in-process short-term")
 		}
 	}
+	// Optional Redis short-term (ATLAS_REDIS_URL=redis://host:6379/0).
+	if redisURL := strings.TrimSpace(os.Getenv("ATLAS_REDIS_URL")); redisURL != "" {
+		rm, err := orchestrator.OpenRedisShortMemory(ctx, redisURL, mem)
+		if err != nil {
+			log.Printf("redis short-term unavailable, keeping previous memory store: %v", err)
+		} else {
+			redisMem = rm
+			mem = rm
+			log.Printf("memory: redis short-term + long-term backend")
+		}
+	}
 
 	embedder := &orchestrator.GatewayEmbedder{BaseURL: gatewayURL, Model: "fake-embed"}
 	// Prefer Qdrant with in-process fallback always attached.
 	retriever := orchestrator.NewQdrantRetriever(qdrantURL, embedder)
 
 	gateway := orchestrator.NewHTTPGatewayClient(gatewayURL, model)
+	// Hybrid LLM planner with deterministic rule fallback.
+	planner := orchestrator.NewLLMPlanner(gateway, model, orchestrator.NewRulePlanner())
 	svc := orchestrator.NewService(orchestrator.ServiceConfig{
 		Store:       store,
 		Gateway:     gateway,
@@ -61,7 +75,7 @@ func main() {
 		Tools:       orchestrator.DefaultToolRegistry(),
 		Memory:      mem,
 		Retriever:   retriever,
-		Planner:     &orchestrator.RulePlanner{Gateway: gateway, Model: model},
+		Planner:     planner,
 		Model:       model,
 		TokenBudget: 512,
 		WorkspaceID: workspace,
@@ -92,6 +106,9 @@ func main() {
 	}
 	if pgMem != nil {
 		_ = pgMem.Close()
+	}
+	if redisMem != nil {
+		_ = redisMem.Close()
 	}
 }
 

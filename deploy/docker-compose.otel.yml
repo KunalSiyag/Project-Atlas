@@ -1,0 +1,45 @@
+# Observability overlay: OTEL collector + Grafana
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d
+#   # or with fake gateway:
+#   docker compose -f docker-compose.yml -f docker-compose.fake.yml -f docker-compose.otel.yml up -d
+# Grafana: http://localhost:3000 (admin / atlas-dev-password)
+# OTLP gRPC: localhost:4317  OTLP HTTP: localhost:4318  Prometheus: localhost:8889
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+      - "${OTEL_PROM_PORT:-8889}:8889"
+    networks: [atlas]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-atlas-dev-password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - otel-collector
+    networks: [atlas]
+
+  # Point the gateway at the collector when this overlay is active.
+  inference-gateway:
+    environment:
+      ATLAS_OTEL_EXPORTER: ${ATLAS_OTEL_EXPORTER:-otlp}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: inference-gateway
+
+volumes:
+  grafana_data:

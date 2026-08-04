@@ -89,3 +89,37 @@ curl -X POST http://localhost:8080/v1/conversations/<conversation-id>/messages \
 - Ollama does not automatically download a model. After startup, pull one with `docker compose exec ollama ollama pull gemma3` if the image supports that command.
 - The gateway image is built from `services/inference-gateway/Dockerfile` and runs as a non-root user.
 - The named volumes are persistent. Backups and restore procedures are not yet implemented.
+
+## Observability (OTEL + Grafana)
+
+Optional overlay starts an OpenTelemetry Collector and Grafana with a provisioned Prometheus datasource and an Atlas gateway dashboard.
+
+```bash
+cd deploy
+cp -n .env.example .env 2>/dev/null || true
+# Full stack with Ollama + OTEL:
+docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d
+# Offline fake provider + OTEL:
+docker compose -f docker-compose.yml -f docker-compose.fake.yml -f docker-compose.otel.yml up -d
+```
+
+| Service | URL / port | Notes |
+|---------|------------|--------|
+| Grafana | http://localhost:3000 | user `admin` / password `atlas-dev-password` (override via env) |
+| OTLP gRPC | localhost:4317 | traces/metrics from apps |
+| OTLP HTTP | localhost:4318 | used by gateway when `ATLAS_OTEL_EXPORTER=otlp` |
+| Prometheus scrape | localhost:8889 | collector exporter scraped by Grafana |
+
+Config files:
+
+- `deploy/otel/otel-collector-config.yaml`
+- `deploy/grafana/provisioning/datasources/datasources.yaml`
+- `deploy/grafana/provisioning/dashboards/dashboards.yaml`
+- `deploy/grafana/dashboards/atlas-gateway.json`
+
+Without Docker, validate the compose graph:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.otel.yml config
+```
+

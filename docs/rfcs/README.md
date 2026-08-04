@@ -17,7 +17,7 @@ Atlas Product Engineering
 Accepted
 
 ## Last Updated
-2026-08-03
+2026-08-05
 
 ## Related Documents
 - [Engineering Principles](../engineering/PRINCIPLES.md)
@@ -28,3 +28,9 @@ Accepted
 3. Review trade-offs and open questions.
 4. Mark the RFC Accepted before implementation begins.
 5. Create ADRs for architectural decisions that arise from the RFC.
+
+## Index
+| RFC | Title | Status |
+|-----|-------|--------|
+| [0000](./0000-template.md) | Template | Template |
+| [0001](./0001-tool-sdk-interface.md) | Tool SDK interface | Accepted |

@@ -10,7 +10,7 @@ GATEWAY_URL ?= http://127.0.0.1:8080
 GATEWAY_ADDR ?= 127.0.0.1:8080
 ORCH_ADDR   ?= 127.0.0.1:8090
 
-.PHONY: help gateway-test cli-test orch-test test gateway-run orch-run cli-build cli-run cli-health cli-generate compose-fake smoke
+.PHONY: help gateway-test cli-test orch-test eval-test eval test gateway-run orch-run cli-build cli-run cli-health cli-generate compose-fake compose-otel smoke
 
 help:
 	@echo "Atlas make targets"
@@ -26,6 +26,8 @@ help:
 	@echo "  make cli-generate MSG='hi'  one-shot generate"
 	@echo "  make smoke          one-shot fake gateway + CLI health/generate/openapi"
 	@echo "  make compose-fake   docker compose with fake provider + postgres"
+	@echo "  make compose-otel   compose config for OTEL+Grafana overlay"
+	@echo "  make eval           run atlas-eval on sample fixtures"
 
 gateway-test:
 	cd $(GATEWAY_DIR) && go test ./...
@@ -36,7 +38,16 @@ orch-test:
 cli-test:
 	cd $(CLI_DIR) && go test ./...
 
-test: gateway-test orch-test cli-test
+test: gateway-test orch-test cli-test eval-test
+
+eval-test:
+	cd tools/atlas-eval && go test ./...
+
+eval:
+	cd tools/atlas-eval && go run . -dataset ../../fixtures/eval/v1/sample.json -out ../../eval-report.json
+
+compose-otel:
+	cd deploy && docker compose -f docker-compose.yml -f docker-compose.otel.yml config >/dev/null && echo "compose otel: OK"
 
 gateway-run:
 	cd $(GATEWAY_DIR) && \

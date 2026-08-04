@@ -17,7 +17,7 @@ Atlas Architecture
 Accepted
 
 ## Last Updated
-2026-08-03
+2026-08-05
 
 ## Related Documents
 - [RFC Process](../rfcs/README.md)
@@ -38,3 +38,4 @@ Create an ADR when a decision has long-term architectural consequences, establis
 | [0006](./0006-configuration-strategy.md) | Configuration strategy | Accepted |
 | [0007](./0007-testing-philosophy.md) | Testing philosophy | Accepted |
 | [0008](./0008-opentelemetry.md) | OpenTelemetry for observability | Accepted |
+| [0009](./0009-context-builder-token-budgeting.md) | Context builder token budgeting | Accepted |

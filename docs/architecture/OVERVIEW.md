@@ -79,3 +79,5 @@ Repository root may include high-level images (`HLD.png`, `System-design.png`) a
 
 ## What We Intentionally Defer
 Autonomous coding agents, self-improving loops, and large multi-agent swarms are non-goals until fundamentals are solid. See [NON_GOALS](../product/NON_GOALS.md).
+
+- [Prompt Registry Design](./prompt-registry.md)

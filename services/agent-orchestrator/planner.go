@@ -13,6 +13,43 @@ type Planner interface {
 	Plan(ctx context.Context, goal string) ([]Step, error)
 }
 
+// LLMPlanner asks the inference gateway for a JSON plan, validates it, and
+// falls back to Fallback (default RulePlanner) when the model is unavailable
+// or returns an invalid plan.
+type LLMPlanner struct {
+	Gateway  InferenceClient
+	Model    string
+	Fallback Planner
+}
+
+// NewLLMPlanner constructs a hybrid planner. Fallback defaults to RulePlanner.
+func NewLLMPlanner(gateway InferenceClient, model string, fallback Planner) *LLMPlanner {
+	if fallback == nil {
+		fallback = NewRulePlanner()
+	}
+	return &LLMPlanner{Gateway: gateway, Model: model, Fallback: fallback}
+}
+
+func (p *LLMPlanner) Plan(ctx context.Context, goal string) ([]Step, error) {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return nil, fmt.Errorf("goal is required")
+	}
+	if p.Gateway != nil {
+		steps, err := planFromModel(ctx, p.Gateway, p.Model, goal)
+		if err == nil {
+			if err := ValidatePlan(steps); err == nil {
+				return steps, nil
+			}
+		}
+		// Model failed or invalid plan — deterministic fallback.
+	}
+	if p.Fallback == nil {
+		return NewRulePlanner().Plan(ctx, goal)
+	}
+	return p.Fallback.Plan(ctx, goal)
+}
+
 // RulePlanner produces multi-step plans from goal keywords (deterministic, no LLM required).
 type RulePlanner struct {
 	// Gateway optional: if set and goal asks for "json plan", can call model (optional path).
@@ -33,9 +70,10 @@ func (p *RulePlanner) Plan(ctx context.Context, goal string) ([]Step, error) {
 		return nil, fmt.Errorf("goal is required")
 	}
 
-	// Optional: model JSON plan when goal starts with "plan:"
+	// Optional: model JSON plan when goal starts with "plan:" (legacy path).
+	// Prefer LLMPlanner for always-on model planning with rule fallback.
 	if strings.HasPrefix(strings.ToLower(goal), "plan:") && p.Gateway != nil {
-		steps, err := p.planFromModel(ctx, strings.TrimSpace(goal[5:]))
+		steps, err := planFromModel(ctx, p.Gateway, p.Model, strings.TrimSpace(goal[5:]))
 		if err == nil {
 			if err := ValidatePlan(steps); err != nil {
 				return nil, err
@@ -104,23 +142,45 @@ func (p *RulePlanner) Plan(ctx context.Context, goal string) ([]Step, error) {
 	return steps, nil
 }
 
-func (p *RulePlanner) planFromModel(ctx context.Context, goal string) ([]Step, error) {
-	prompt := `Return ONLY JSON array of steps: [{"step_id":"...","name":"...","kind":"context|model|tool|finalize","depends_on":[],"tool_name":"","tool_input":{}}] for goal: ` + goal
-	resp, err := p.Gateway.Generate(ctx, GenerateRequest{
+// planFromModel asks the gateway for a JSON step array and normalizes defaults.
+func planFromModel(ctx context.Context, gateway InferenceClient, model, goal string) ([]Step, error) {
+	if gateway == nil {
+		return nil, fmt.Errorf("gateway is required")
+	}
+	prompt := `Return ONLY a JSON array of plan steps for the user goal.
+Each step object fields: step_id (string), name (string), kind (one of context|model|tool|finalize),
+depends_on (array of step_id), tool_name (for tool steps), tool_input (object), max_attempts (int optional).
+Include at least one context step, one model or tool step, and a finalize step.
+Goal: ` + goal
+	resp, err := gateway.Generate(ctx, GenerateRequest{
 		Messages: []Message{
-			{Role: "system", Content: "You output valid JSON only."},
+			{Role: "system", Content: "You are an Atlas plan compiler. Output valid JSON array only. No prose."},
 			{Role: "user", Content: prompt},
 		},
-		Model: p.Model,
+		Model:     model,
+		TaskClass: "plan",
 	})
 	if err != nil {
 		return nil, err
 	}
-	raw := strings.TrimSpace(resp.Message.Content)
-	// strip markdown fences if present
+	return ParsePlanJSON(resp.Message.Content)
+}
+
+// ParsePlanJSON extracts and normalizes a step array from model output.
+// Exported so tests and eval can exercise the same validation path.
+func ParsePlanJSON(content string) ([]Step, error) {
+	raw := strings.TrimSpace(content)
 	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```JSON")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+	// Tolerate leading prose by locating the first JSON array.
+	if i := strings.Index(raw, "["); i >= 0 {
+		if j := strings.LastIndex(raw, "]"); j > i {
+			raw = raw[i : j+1]
+		}
+	}
 	var steps []Step
 	if err := json.Unmarshal([]byte(raw), &steps); err != nil {
 		return nil, fmt.Errorf("invalid plan JSON: %w", err)

@@ -17,7 +17,7 @@ Atlas Core Engineering
 Accepted
 
 ## Last Updated
-2026-08-04
+2026-08-05
 
 ## Related Documents
 - [Milestones](./MILESTONES.md)
@@ -28,6 +28,10 @@ Keep a human-readable list. When versioned releases begin, adopt Keep a Changelo
 ## Unreleased
 
 ### Added
+- Hybrid **LLMPlanner** (gateway JSON plan + ValidatePlan) with **RulePlanner** fallback; Redis short-term memory (`ATLAS_REDIS_URL`); RAG chunking/ranking/score metadata.
+- Offline **eval harness** `tools/atlas-eval` + fixture format `fixtures/eval/v1/`.
+- Compose observability overlay `deploy/docker-compose.otel.yml` (OTEL collector + Grafana provisioning/dashboard).
+- ADR 0009 context-builder token budgeting; RFC 0001 Tool SDK interface; prompt registry design (`docs/architecture/prompt-registry.md`).
 - SSE streaming generate (`stream: true` on `POST /v1/generate`) with native fake/Ollama/OpenAI streams and CLI `-stream`.
 - Runnable inference gateway (`services/inference-gateway`) with fake/Ollama providers, HTTP APIs, retries, run + conversation Postgres stores.
 - OpenAPI 3 contract for implemented routes (`openapi.yaml`, served at `GET /openapi.yaml`), including embeddings.

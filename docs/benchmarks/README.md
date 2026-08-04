@@ -23,3 +23,12 @@ Bootstrap
 
 ## Index
 No benchmarks have been authored yet.
+
+## Eval fixtures
+
+Deterministic offline suites live under [`fixtures/eval/v1/`](../../fixtures/eval/v1/FORMAT.md). Run with:
+
+```bash
+cd tools/atlas-eval && go run . -dataset ../../fixtures/eval/v1/sample.json -out report.json
+```
+

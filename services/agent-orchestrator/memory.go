@@ -226,5 +226,36 @@ func CollectMemoryNotes(ctx context.Context, mem MemoryStore, runID, workspaceID
 	return notes
 }
 
-// Redis-like note: we use in-memory short-term; optional Redis can wrap the same interface later.
+// HybridMemory uses Redis (or any MemoryStore) for short-term and another store for long-term.
+type HybridMemory struct {
+	Short MemoryStore
+	Long  MemoryStore
+}
+
+func (m *HybridMemory) PutShort(ctx context.Context, runID, content string) error {
+	if m.Short == nil {
+		return errors.New("short memory not configured")
+	}
+	return m.Short.PutShort(ctx, runID, content)
+}
+func (m *HybridMemory) ListShort(ctx context.Context, runID string) ([]MemoryFact, error) {
+	if m.Short == nil {
+		return nil, nil
+	}
+	return m.Short.ListShort(ctx, runID)
+}
+func (m *HybridMemory) PutLong(ctx context.Context, fact MemoryFact) error {
+	if m.Long == nil {
+		return errors.New("long memory not configured")
+	}
+	return m.Long.PutLong(ctx, fact)
+}
+func (m *HybridMemory) ListLong(ctx context.Context, workspaceID, userID string, limit int) ([]MemoryFact, error) {
+	if m.Long == nil {
+		return nil, nil
+	}
+	return m.Long.ListLong(ctx, workspaceID, userID, limit)
+}
+
+// Ensure fmt stays imported for any remaining uses.
 var _ = fmt.Sprintf

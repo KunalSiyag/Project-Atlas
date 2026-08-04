@@ -4,13 +4,13 @@
 Coordinate agent execution: plan DAGs, tools with approvals, memory, light RAG, and inference-gateway calls.
 
 ## Status
-M2/M3 runnable slice (2026-08-04)
+M2/M3 runnable slice (2026-08-05)
 
 ## Features
 
 | Capability | How |
 |------------|-----|
-| Dynamic plan | Rule planner from goal keywords (`calculate`, `echo`, `http`, `danger`) |
+| Dynamic plan | LLMPlanner (gateway JSON) + RulePlanner fallback; keyword rules without gateway (`calculate`, `echo`, `http`, `danger`) |
 | Tool steps | `echo`, `calculator`, `http_get`, `danger_echo` (approval) |
 | Schema + timeout | `ValidateToolInput` + per-tool deadline |
 | Approvals | Run status `waiting_approval`; `POST /v1/runs/{id}/approve` or `/reject` |
@@ -53,6 +53,7 @@ cd clients/atlas-cli && go build -o atlas .
 | `ATLAS_INFERENCE_GATEWAY_URL` | `http://127.0.0.1:8080` |
 | `ATLAS_ORCHESTRATOR_DATABASE_URL` | empty → memory runs |
 | `ATLAS_QDRANT_URL` | `http://127.0.0.1:6333` |
+| `ATLAS_REDIS_URL` | empty → in-process short-term; `redis://host:6379/0` for Redis |
 | `ATLAS_REQUIRE_WORKSPACE` | empty; `1` requires `X-Workspace-ID` |
 
 ## Tests

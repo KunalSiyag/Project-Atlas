@@ -13,13 +13,21 @@ import (
 	"sync"
 )
 
-// Document is an ingested knowledge chunk.
+// Document is an ingested knowledge chunk (or parent metadata after multi-chunk ingest).
 type Document struct {
 	ID       string    `json:"id"`
 	Title    string    `json:"title,omitempty"`
 	Content  string    `json:"content"`
 	Vector   []float64 `json:"vector,omitempty"`
 	Source   string    `json:"source,omitempty"`
+	// Score is set on Search results (cosine + lexical boosts); omitted on ingest.
+	Score float64 `json:"score,omitempty"`
+	// ChunkIndex is 0-based when a parent document was split on ingest.
+	ChunkIndex int `json:"chunk_index,omitempty"`
+	// ParentID links a chunk back to the original document id (empty for whole docs).
+	ParentID string `json:"parent_id,omitempty"`
+	// Metadata is free-form source metadata returned on search hits.
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // Retriever stores and searches documents.
@@ -27,6 +35,12 @@ type Retriever interface {
 	Ingest(ctx context.Context, doc Document) (Document, error)
 	Search(ctx context.Context, query string, topK int) ([]Document, error)
 }
+
+// Default chunk sizes for production-style multi-chunk ingest.
+const (
+	defaultChunkRunes = 280
+	defaultChunkOverlap = 40
+)
 
 // Embedder produces vectors (gateway embeddings or local fake).
 type Embedder interface {
@@ -111,17 +125,26 @@ func hashVector(text string, dims int) []float64 {
 }
 
 // InProcessRetriever is the honest fallback when Qdrant is unavailable.
+// It chunks long content on ingest and ranks with cosine + BM25-lite lexical boosts.
 type InProcessRetriever struct {
-	mu       sync.RWMutex
-	docs     []Document
-	embedder Embedder
+	mu          sync.RWMutex
+	docs        []Document
+	embedder    Embedder
+	ChunkRunes  int
+	ChunkOverlap int
+	// DisableChunking forces single-vector ingest (tests that assert whole-doc IDs).
+	DisableChunking bool
 }
 
 func NewInProcessRetriever(embedder Embedder) *InProcessRetriever {
 	if embedder == nil {
 		embedder = FakeEmbedder{Dims: 8}
 	}
-	return &InProcessRetriever{embedder: embedder}
+	return &InProcessRetriever{
+		embedder:     embedder,
+		ChunkRunes:   defaultChunkRunes,
+		ChunkOverlap: defaultChunkOverlap,
+	}
 }
 
 func (r *InProcessRetriever) Ingest(ctx context.Context, doc Document) (Document, error) {
@@ -131,17 +154,74 @@ func (r *InProcessRetriever) Ingest(ctx context.Context, doc Document) (Document
 	if doc.ID == "" {
 		doc.ID = newID()
 	}
-	vecs, err := r.embedder.Embed(ctx, []string{doc.Content})
+	if doc.Metadata == nil {
+		doc.Metadata = map[string]string{}
+	}
+	if doc.Source != "" {
+		doc.Metadata["source"] = doc.Source
+	}
+	if doc.Title != "" {
+		doc.Metadata["title"] = doc.Title
+	}
+
+	chunks := []string{doc.Content}
+	if !r.DisableChunking {
+		size := r.ChunkRunes
+		if size <= 0 {
+			size = defaultChunkRunes
+		}
+		overlap := r.ChunkOverlap
+		if overlap < 0 {
+			overlap = 0
+		}
+		chunks = ChunkText(doc.Content, size, overlap)
+	}
+	if len(chunks) == 0 {
+		return Document{}, fmt.Errorf("content required")
+	}
+
+	// Embed all chunks in one batch when possible.
+	vecs, err := r.embedder.Embed(ctx, chunks)
 	if err != nil {
 		return Document{}, err
 	}
-	if len(vecs) > 0 {
-		doc.Vector = vecs[0]
-	}
+
 	r.mu.Lock()
-	r.docs = append(r.docs, doc)
-	r.mu.Unlock()
-	return doc, nil
+	defer r.mu.Unlock()
+	parentID := doc.ID
+	for i, chunk := range chunks {
+		d := Document{
+			ID:         parentID,
+			Title:      doc.Title,
+			Content:    chunk,
+			Source:     doc.Source,
+			ChunkIndex: i,
+			Metadata:   copyStringMap(doc.Metadata),
+		}
+		if len(chunks) > 1 {
+			d.ID = fmt.Sprintf("%s#c%d", parentID, i)
+			d.ParentID = parentID
+			if d.Metadata == nil {
+				d.Metadata = map[string]string{}
+			}
+			d.Metadata["parent_id"] = parentID
+			d.Metadata["chunk_index"] = fmt.Sprintf("%d", i)
+		}
+		if i < len(vecs) {
+			d.Vector = vecs[i]
+		}
+		r.docs = append(r.docs, d)
+	}
+	// Return parent-shaped document (first chunk vector for convenience).
+	out := doc
+	if len(vecs) > 0 {
+		out.Vector = vecs[0]
+	}
+	out.Metadata = copyStringMap(doc.Metadata)
+	if len(chunks) > 1 {
+		out.Metadata["chunks"] = fmt.Sprintf("%d", len(chunks))
+	}
+	return out, nil
 }
 
 func (r *InProcessRetriever) Search(ctx context.Context, query string, topK int) ([]Document, error) {
@@ -163,19 +243,21 @@ func (r *InProcessRetriever) Search(ctx context.Context, query string, topK int)
 		s float64
 	}
 	var all []scored
-	qwords := strings.Fields(strings.ToLower(query))
+	qwords := tokenize(query)
 	for _, d := range r.docs {
-		score := cosine(q, d.Vector)
-		// Lexical boost so tests and sparse fake embeddings still retrieve.
-		low := strings.ToLower(d.Content + " " + d.Title)
-		for _, w := range qwords {
-			if len(w) > 3 && strings.Contains(low, w) {
-				score += 0.5
-			}
-		}
-		all = append(all, scored{d: d, s: score})
+		score := rankScore(q, d, qwords)
+		hit := d
+		hit.Score = score
+		// Clear large vectors from search results for API cleanliness.
+		hit.Vector = nil
+		all = append(all, scored{d: hit, s: score})
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].s > all[j].s })
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].s == all[j].s {
+			return all[i].d.ID < all[j].d.ID
+		}
+		return all[i].s > all[j].s
+	})
 	if len(all) > topK {
 		all = all[:topK]
 	}
@@ -184,6 +266,94 @@ func (r *InProcessRetriever) Search(ctx context.Context, query string, topK int)
 		out = append(out, s.d)
 	}
 	return out, nil
+}
+
+// rankScore combines cosine similarity with lexical term frequency boosts.
+func rankScore(queryVec []float64, d Document, qwords []string) float64 {
+	score := cosine(queryVec, d.Vector)
+	low := strings.ToLower(d.Content + " " + d.Title + " " + d.Source)
+	for _, w := range qwords {
+		if len(w) < 3 {
+			continue
+		}
+		if strings.Contains(low, w) {
+			// Longer query terms and title hits weigh more.
+			boost := 0.35 + 0.05*float64(minInt(len(w), 12))
+			if d.Title != "" && strings.Contains(strings.ToLower(d.Title), w) {
+				boost += 0.4
+			}
+			score += boost
+		}
+	}
+	// Exact phrase boost (query as a whole substring).
+	if q := strings.TrimSpace(strings.ToLower(strings.Join(qwords, " "))); len(q) > 6 && strings.Contains(low, q) {
+		score += 1.0
+	}
+	return score
+}
+
+func tokenize(s string) []string {
+	fields := strings.Fields(strings.ToLower(s))
+	var out []string
+	for _, f := range fields {
+		f = strings.Trim(f, ".,;:!?\"'()[]{}")
+		if f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// ChunkText splits text into overlapping rune windows for multi-chunk ingest.
+func ChunkText(text string, size, overlap int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if size <= 0 {
+		size = defaultChunkRunes
+	}
+	if overlap < 0 {
+		overlap = 0
+	}
+	if overlap >= size {
+		overlap = size / 4
+	}
+	runes := []rune(text)
+	if len(runes) <= size {
+		return []string{text}
+	}
+	var chunks []string
+	step := size - overlap
+	for start := 0; start < len(runes); start += step {
+		end := start + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunks = append(chunks, string(runes[start:end]))
+		if end == len(runes) {
+			break
+		}
+	}
+	return chunks
 }
 
 func cosine(a, b []float64) float64 {
@@ -329,7 +499,11 @@ func (q *QdrantRetriever) Search(ctx context.Context, query string, topK int) ([
 	for _, r := range parsed.Result {
 		content, _ := r.Payload["content"].(string)
 		title, _ := r.Payload["title"].(string)
-		out = append(out, Document{ID: fmt.Sprint(r.ID), Title: title, Content: content})
+		source, _ := r.Payload["source"].(string)
+		out = append(out, Document{
+			ID: fmt.Sprint(r.ID), Title: title, Content: content, Source: source, Score: r.Score,
+			Metadata: map[string]string{"source": source, "title": title},
+		})
 	}
 	if len(out) == 0 {
 		return q.Fallback.Search(ctx, query, topK)
@@ -337,13 +511,19 @@ func (q *QdrantRetriever) Search(ctx context.Context, query string, topK int) ([
 	return out, nil
 }
 
-// DocSnippets converts retrieval hits to context-builder notes.
+// DocSnippets converts retrieval hits to context-builder notes (includes source/score).
 func DocSnippets(docs []Document) []string {
 	var out []string
 	for _, d := range docs {
 		s := d.Content
 		if d.Title != "" {
 			s = d.Title + ": " + s
+		}
+		if d.Source != "" {
+			s = s + " [source=" + d.Source + "]"
+		}
+		if d.Score != 0 {
+			s = fmt.Sprintf("%s [score=%.3f]", s, d.Score)
 		}
 		out = append(out, s)
 	}

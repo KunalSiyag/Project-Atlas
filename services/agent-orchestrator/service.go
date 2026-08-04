@@ -55,7 +55,12 @@ func NewService(cfg ServiceConfig) *Service {
 	}
 	planner := cfg.Planner
 	if planner == nil {
-		planner = &RulePlanner{Gateway: cfg.Gateway, Model: cfg.Model}
+		// Default: LLM plan when gateway is set, with rule fallback; pure rules otherwise.
+		if cfg.Gateway != nil {
+			planner = NewLLMPlanner(cfg.Gateway, cfg.Model, NewRulePlanner())
+		} else {
+			planner = NewRulePlanner()
+		}
 	}
 	idFunc := cfg.IDFunc
 	if idFunc == nil {
