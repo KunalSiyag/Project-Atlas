@@ -13,11 +13,17 @@ Document process configuration for local development and future deployment.
 | `ATLAS_INFERENCE_MODEL` | `fake-model` | Default model sent to the selected provider |
 | `ATLAS_OLLAMA_URL` | `http://localhost:11434` | Ollama server base URL |
 | `ATLAS_INFERENCE_MAX_ATTEMPTS` | `3` | Maximum provider attempts, including the first call |
-| `ATLAS_DATABASE_URL` | empty | PostgreSQL connection string for durable inference runs |
+| `ATLAS_DATABASE_URL` | empty | PostgreSQL connection string for durable inference runs and conversations |
+| `ATLAS_OPENAI_API_KEY` | empty | API key for OpenAI-compatible chat/embeddings |
+| `ATLAS_OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible API base (override for proxies/mocks) |
+| `ATLAS_EMBEDDING_PROVIDER` | `fake` | Embedding adapter: `fake` or `openai` |
+| `ATLAS_OTEL_EXPORTER` | `none` | Telemetry export: `none`, `console`, or `otlp` |
+| `ATLAS_OTEL_ENDPOINT` | `localhost:4318` | OTLP/HTTP host:port when exporter is `otlp` |
+| `ATLAS_OTEL_SERVICE_NAME` | `atlas-inference-gateway` | Resource service.name |
 
-The current implementation supports the deterministic `fake` provider. A real provider adapter can use the same configuration key after its implementation is added.
+Supported chat providers: **`fake`**, **`ollama`**, **`openai`** (OpenAI-compatible Chat Completions). Embedding providers: **`fake`**, **`openai`**.
 
-Routing is currently an in-process static map: `plan` uses `fake-planner`, `act` uses `fake-model`, and unknown task classes use the default route.
+Routing is an in-process static map: task classes `plan` and `act` both use the configured provider and `ATLAS_INFERENCE_MODEL`. Unknown task classes use the same default route.
 
 ## Example
 

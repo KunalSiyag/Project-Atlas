@@ -1,0 +1,22 @@
+# Override for a beginner-friendly local stack without Ollama.
+# Uses the deterministic fake provider so the CLI can be tested offline.
+#
+# Usage:
+#   cd deploy
+#   docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build
+#
+# Then:
+#   cd ../clients/atlas-cli && go run . -url http://localhost:8080 health
+
+services:
+  inference-gateway:
+    environment:
+      ATLAS_INFERENCE_PROVIDER: fake
+      ATLAS_INFERENCE_MODEL: fake-model
+      # Ollama URL is unused by the fake provider but config still validates non-empty.
+      ATLAS_OLLAMA_URL: http://ollama:11434
+      ATLAS_DATABASE_URL: postgres://atlas:atlas-dev-password@postgres:5432/atlas?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Ollama is optional for the fake path; do not block gateway startup on it.

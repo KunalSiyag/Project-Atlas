@@ -23,14 +23,15 @@ Atlas Core Engineering
 
 ## Status
 
-Draft
+Implemented subset documented in OpenAPI; embeddings/stream still planned
 
 ## Last Updated
 
-2026-08-03
+2026-08-04
 
 ## Related Documents
 
+- [OpenAPI 3 (implemented routes)](./openapi.yaml) — also `GET /openapi.yaml` on a running gateway
 - [Test Plan](./TEST_PLAN.md)
 - [Communication Protocols ADR](../../docs/adr/0004-communication-protocols.md)
 

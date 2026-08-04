@@ -1,31 +1,62 @@
 # Agent Orchestrator Service
 
 ## Purpose
-Coordinate agent execution workflows while keeping orchestration logic independent from model, tool, storage, and messaging vendors.
-
-## Scope
-This service owns orchestration planning, execution state transitions, tool invocation coordination, and execution event emission.
-
-## Dependencies
-- [Service AI Context](./AI_CONTEXT.md)
-- [Service PRD](./PRD.md)
-- [Service API](./API.md)
-- [Service Data Model](./DATA_MODEL.md)
-
-## Owner
-Atlas Agent Runtime Team
+Coordinate agent execution: plan DAGs, tools with approvals, memory, light RAG, and inference-gateway calls.
 
 ## Status
-Bootstrap
+M2/M3 runnable slice (2026-08-04)
 
-## Last Updated
-2026-08-03
+## Features
 
-## Related Documents
-- [Repository Architecture Overview](../../docs/architecture/OVERVIEW.md)
-- [Test Plan](./TEST_PLAN.md)
-- [TODO](./TODO.md)
-- [Decisions](./DECISIONS.md)
+| Capability | How |
+|------------|-----|
+| Dynamic plan | Rule planner from goal keywords (`calculate`, `echo`, `http`, `danger`) |
+| Tool steps | `echo`, `calculator`, `http_get`, `danger_echo` (approval) |
+| Schema + timeout | `ValidateToolInput` + per-tool deadline |
+| Approvals | Run status `waiting_approval`; `POST /v1/runs/{id}/approve` or `/reject` |
+| Memory | Short-term per run + long-term Postgres/in-memory facts → context builder |
+| RAG | Ingest + top-k retrieve (Qdrant if up, else in-process vectors) |
+| Gateway | Model steps call `POST /v1/generate` |
 
-## Current State
-This service is documentation-only. Implementation must not begin until requirements, API contracts, data models, tasks, and tests are reviewed.
+## Run
+
+```bash
+# gateway
+make gateway-run
+
+# orchestrator
+ATLAS_INFERENCE_GATEWAY_URL=http://127.0.0.1:8080 \
+ATLAS_ORCHESTRATOR_DATABASE_URL=postgres://atlas:atlas-dev-password@127.0.0.1:5432/atlas?sslmode=disable \
+ATLAS_QDRANT_URL=http://127.0.0.1:6333 \
+make orch-run
+
+# CLI
+cd clients/atlas-cli && go build -o atlas .
+./atlas run "calculate 21+21"
+./atlas run -auto-approve "danger echo ship payload"
+```
+
+## HTTP API
+
+- `POST /v1/runs` `{ "goal": "..." }`
+- `POST /v1/runs/{id}/start`
+- `POST /v1/runs/{id}/approve` | `/reject` | `/cancel`
+- `GET /v1/runs/{id}`
+- `POST /v1/knowledge/ingest` `{ "title", "content" }`
+- `POST /v1/memory` long-term fact
+
+## Env
+
+| Variable | Default |
+|----------|---------|
+| `ATLAS_ORCHESTRATOR_ADDR` | `:8090` |
+| `ATLAS_INFERENCE_GATEWAY_URL` | `http://127.0.0.1:8080` |
+| `ATLAS_ORCHESTRATOR_DATABASE_URL` | empty → memory runs |
+| `ATLAS_QDRANT_URL` | `http://127.0.0.1:6333` |
+| `ATLAS_REQUIRE_WORKSPACE` | empty; `1` requires `X-Workspace-ID` |
+
+## Tests
+
+```bash
+go test ./...
+```

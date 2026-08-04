@@ -10,11 +10,33 @@ This Compose stack builds the inference gateway and runs it with PostgreSQL, Red
 
 ## Start
 
+Full stack (includes Ollama for real local models):
+
 ```bash
 cd deploy
 cp .env.example .env
 docker compose up -d
 docker compose ps
+```
+
+Beginner / offline path (fake provider, no model download — best for CLI testing):
+
+```bash
+cd deploy
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.fake.yml up --build
+```
+
+Or from the repository root: `make compose-fake`.
+
+Without Docker, run only the gateway + fake provider:
+
+```bash
+make gateway-run
+# other terminal:
+make cli-health
+make cli-generate MSG='hello atlas'
+make cli-run
 ```
 
 Stop the services without deleting data:

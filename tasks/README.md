@@ -18,7 +18,7 @@ Atlas Core Engineering
 Bootstrap
 
 ## Last Updated
-2026-08-03
+2026-08-04
 
 ## Related Documents
 - [Sprints](../management/SPRINTS.md)
@@ -37,5 +37,7 @@ Each task should include:
 | ID | Title | Status |
 |----|-------|--------|
 | [0001](./0001-repository-bootstrap.md) | Repository bootstrap (M0 docs foundation) | Done |
-| [0002](./0002-inference-gateway-docs.md) | Inference gateway service documentation pack | Planned |
+| [0002](./0002-inference-gateway-docs.md) | Inference gateway service documentation pack | Done (docs present) |
+| [0003](./0003-core-schemas-and-contracts.md) | Core schemas and contracts | Done (files present) |
+| [0004](./0004-openapi-and-cli-inspect.md) | OpenAPI + CLI run/conversation/openapi | Done |
 | [0003](./0003-core-schemas-and-contracts.md) | Expand core schemas and provider contracts | Planned |

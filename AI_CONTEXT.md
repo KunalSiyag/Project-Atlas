@@ -15,12 +15,13 @@ Applies to repository-wide planning, documentation, architecture, and implementa
 Atlas Core Engineering
 
 ## Status
-M0 Foundation Complete
+M0 Foundation Complete · M1 runtime in progress
 
 ## Last Updated
-2026-08-03
+2026-08-04
 
 ## Related Documents
+- [Beginner Build Record](./docs/engineering/BEGINNER_BUILD_RECORD.md)
 - [Product Index](./docs/product/README.md)
 - [Domain Index](./docs/domain/README.md)
 - [Architecture Overview](./docs/architecture/OVERVIEW.md)
@@ -28,6 +29,8 @@ M0 Foundation Complete
 - [Management](./management/README.md)
 - [RFC Process](./docs/rfcs/README.md)
 - [Roadmap](./management/ROADMAP.md)
+- [Inference Gateway](./services/inference-gateway/README.md)
+- [Atlas CLI](./clients/atlas-cli/README.md)
 
 ## What Atlas is
 An enterprise-oriented **AI agent platform** (not a single chatbot demo). The LLM is one dependency behind interfaces. Core concerns: workspace auth, conversations, context building, planning/workflows, tool runtime, model routing, guardrails, evaluation, observability, multi-store storage.
@@ -41,10 +44,12 @@ An enterprise-oriented **AI agent platform** (not a single chatbot demo). The LL
 ## Operating Model
 Atlas is documentation-first. Do not implement features until requirements, product design, architecture, ADRs, API contracts, data models, tasks, and test plans exist for the relevant scope.
 
-## M0 status and next steps
+## M0 / M1 status and next steps
 - **M0 is complete:** product constitution, domain language, subsystem architecture, ADRs 0001–0008, management layer, contracts/schemas/tasks indexes.
-- **Do not** treat missing Go/application code as incomplete M0.
-- **Next (M1):** inference gateway service pack + contracts depth + local Compose data plane; then first code behind `ModelProvider`.
+- **M1 advanced:** `services/inference-gateway` (fake/Ollama/OpenAI-style chat, embeddings, OTEL export none|console|otlp, Postgres optional, OpenAPI), `deploy/` Compose, `clients/atlas-cli`, root `Makefile`.
+- **Orchestrator:** plan DAG, tools+approvals, memory, light RAG, gateway calls, Postgres optional; CLI `atlas run`.
+- **Still open:** streaming SSE, eval harness, Compose Grafana/OTEL collector, enterprise auth, production RAG quality, web UI.
+- Teach-yourself path: [docs/engineering/BEGINNER_BUILD_RECORD.md](./docs/engineering/BEGINNER_BUILD_RECORD.md).
 - Track work in [management/BACKLOG.md](./management/BACKLOG.md) and [tasks/](./tasks/README.md).
 
 ## Core Constraints

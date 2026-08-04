@@ -17,24 +17,34 @@ Atlas Core Engineering
 Accepted
 
 ## Last Updated
-2026-08-03
+2026-08-04
 
 ## Related Documents
 - [Roadmap](./ROADMAP.md)
 - [Changelog](./CHANGELOG.md)
 
-## Now (post-M0)
-1. Author `contracts/chat-provider.md` and embedding-provider contracts in detail.
-2. Add JSON schemas for conversation, workspace, run under `schemas/`.
-3. Scaffold `services/inference-gateway/` documentation pack (mirror orchestrator).
-4. Write task `0002`+ for inference gateway implementation slices.
-5. Draft `deploy/docker-compose.yml` for Postgres, Redis, Qdrant, MinIO (no app code required).
+## Now (M1 in progress)
+1. ~~Author chat/embedding contracts and core schemas~~ (present under `contracts/`, `schemas/`).
+2. ~~Inference gateway docs + first Go implementation~~ (`services/inference-gateway`).
+3. ~~Local Compose data plane~~ (`deploy/`).
+4. ~~Terminal client + OpenAPI for implemented routes~~ (`clients/atlas-cli`, `openapi.yaml`).
+5. ~~OpenTelemetry SDK/exporter~~ (`ATLAS_OTEL_EXPORTER`).
+6. ~~OpenAI-style chat + conformance suite~~.
+7. ~~Embeddings HTTP path~~ (`POST /v1/embeddings`).
+8. ~~Agent-orchestrator first code slice~~ (in-memory runs).
+9. ~~Wire orchestrator → inference gateway~~ (StartRun → `/v1/generate`).
+10. ~~Persist orchestrator runs (Postgres) + real plan DAG (deps/retry/cancel) + context builder~~.
+11. ~~Tool steps / approvals~~ (echo, calculator, http_get, danger_echo + approve API).
+12. ~~Dynamic rule planner + memory + first RAG path + CLI `atlas run`~~.
+13. Richer LLM planner, real Redis short-term, production RAG quality.
+14. Streaming generate, eval harness, Compose OTEL/Grafana dashboards.
 
 ## Next
 - Context builder algorithm ADR (token budgeting strategy).
 - Tool SDK interface RFC.
 - Prompt registry design.
 - Eval dataset fixture format.
+- Agent-orchestrator first implementation slice (after gateway stable).
 
 ## Later
 - Kubernetes manifests.

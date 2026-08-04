@@ -17,7 +17,7 @@ Atlas Core Engineering
 Accepted
 
 ## Last Updated
-2026-08-03
+2026-08-04
 
 ## Related Documents
 - [Milestones](./MILESTONES.md)
@@ -28,6 +28,21 @@ Keep a human-readable list. When versioned releases begin, adopt Keep a Changelo
 ## Unreleased
 
 ### Added
+- Runnable inference gateway (`services/inference-gateway`) with fake/Ollama providers, HTTP APIs, retries, run + conversation Postgres stores.
+- OpenAPI 3 contract for implemented routes (`openapi.yaml`, served at `GET /openapi.yaml`), including embeddings.
+- OpenTelemetry SDK export (`ATLAS_OTEL_EXPORTER=none|console|otlp`).
+- OpenAI-compatible chat + embeddings adapters; chat provider conformance suite.
+- `POST /v1/embeddings` with deterministic fake embedder.
+- First agent-orchestrator Go module (in-memory run lifecycle + HTTP).
+- Orchestrator executes plan DAG against inference gateway, context budget builder, Postgres run store, cancel/retry.
+- Tool steps (echo/calculator/http_get/danger_echo), schema validation, timeouts, approval/reject APIs.
+- Thin memory (short+long), dynamic rule planner, in-process/Qdrant RAG, CLI `atlas run` agent mode.
+- Terminal client `clients/atlas-cli` (ATLAS Unicode banner, health/generate/chat, run inspect, conversation show, openapi fetch).
+- Local Compose data plane under `deploy/` plus `docker-compose.fake.yml` for offline fake-provider testing.
+- Root `Makefile` (`gateway-run`, `cli-run`, `test`, `smoke`, `compose-fake`).
+- `scripts/dev_smoke.sh` one-command local smoke.
+- Beginner teaching doc: `docs/engineering/BEGINNER_BUILD_RECORD.md`.
+- Empty-body support for `POST /v1/conversations`.
 - Product constitution under `docs/product/` (vision, goals, non-goals, personas, FR, NFR, success metrics, glossary).
 - Domain language under `docs/domain/` (workspace, agent, conversation, memory, tool, provider, evaluation, prompt, workflow).
 - Subsystem architecture docs under `docs/architecture/`.

@@ -1,0 +1,331 @@
+openapi: 3.0.3
+info:
+  title: Atlas Inference Gateway
+  description: |
+    Provider-independent chat inference API for Project Atlas.
+    This document describes endpoints that are implemented in the Go service today.
+    Streaming is still planned. Chat, embeddings (batch), conversations, and runs are implemented.
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+    description: Local development default
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusOk"
+  /readyz:
+    get:
+      operationId: readyz
+      summary: Readiness probe (provider configured)
+      responses:
+        "200":
+          description: Ready to accept inference
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusReady"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/embeddings:
+    post:
+      operationId: createEmbeddings
+      summary: Batch text embeddings
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmbeddingRequest"
+      responses:
+        "200":
+          description: Normalized embedding vectors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmbeddingResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/generate:
+    post:
+      operationId: generate
+      summary: One-shot chat generation
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Normalized assistant response
+          headers:
+            X-Request-ID:
+              schema: { type: string }
+            X-Run-ID:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/runs/{run_id}:
+    get:
+      operationId: getRun
+      summary: Inspect a persisted inference run
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Run view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InferenceRunView"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/conversations:
+    post:
+      operationId: createConversation
+      summary: Create a durable conversation (requires Postgres)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "400":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/conversations/{conversation_id}:
+    get:
+      operationId: getConversation
+      summary: Get conversation metadata and messages
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Conversation with ordered messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /v1/conversations/{conversation_id}/messages:
+    post:
+      operationId: postConversationMessage
+      summary: Append user message, generate with full history, persist assistant turn
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+                task_class: { type: string }
+                model: { type: string }
+                metadata:
+                  type: object
+                  additionalProperties: { type: string }
+      responses:
+        "200":
+          description: Assistant ChatResponse for this turn
+          headers:
+            X-Run-ID:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /openapi.yaml:
+    get:
+      operationId: openapiSpec
+      summary: Serve this OpenAPI document
+      responses:
+        "200":
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema: { type: string }
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema: { type: string }
+  responses:
+    Error:
+      description: Normalized error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    StatusOk:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+    StatusReady:
+      type: object
+      properties:
+        status: { type: string, example: ready }
+    Message:
+      type: object
+      required: [role, content]
+      properties:
+        role: { type: string }
+        content: { type: string }
+    ChatRequest:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/Message" }
+        task_class: { type: string }
+        model: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+    EmbeddingRequest:
+      type: object
+      required: [inputs]
+      properties:
+        inputs:
+          type: array
+          items: { type: string }
+        model: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+    EmbeddingResponse:
+      type: object
+      properties:
+        vectors:
+          type: array
+          items:
+            type: array
+            items: { type: number }
+        dimensions: { type: integer }
+        provider: { type: string }
+        model: { type: string }
+        usage: { $ref: "#/components/schemas/Usage" }
+    Usage:
+      type: object
+      properties:
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+    ChatResponse:
+      type: object
+      properties:
+        message: { $ref: "#/components/schemas/Message" }
+        usage: { $ref: "#/components/schemas/Usage" }
+        provider: { type: string }
+        model: { type: string }
+        finish_reason: { type: string }
+    InferenceRunView:
+      type: object
+      properties:
+        run_id: { type: string }
+        request_id: { type: string }
+        task_class: { type: string }
+        requested_model: { type: string }
+        resolved_model: { type: string }
+        provider: { type: string }
+        status: { type: string, enum: [running, succeeded, failed] }
+        result: { $ref: "#/components/schemas/ChatResponse" }
+        error_class: { type: string }
+        error_message: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+    ConversationMessage:
+      type: object
+      properties:
+        message_id: { type: string }
+        role: { type: string }
+        content: { type: string }
+        run_id: { type: string }
+        created_at: { type: string, format: date-time }
+    Conversation:
+      type: object
+      properties:
+        conversation_id: { type: string }
+        title: { type: string }
+        status: { type: string }
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/ConversationMessage" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }

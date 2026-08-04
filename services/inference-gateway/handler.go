@@ -3,6 +3,8 @@ package inference
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,6 +18,7 @@ type Gateway struct {
 	Telemetry     *Telemetry
 	Store         RunStore
 	Conversations ConversationStore
+	Embeddings    EmbeddingProvider
 }
 
 // NewGateway constructs an HTTP gateway around a model provider.
@@ -51,7 +54,22 @@ func newGateway(router ModelRouter, logger *slog.Logger, store RunStore, convers
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Gateway{Router: router, Logger: logger, Telemetry: NewTelemetry(), Store: store, Conversations: conversations}
+	return &Gateway{
+		Router:        router,
+		Logger:        logger,
+		Telemetry:     NewTelemetry(),
+		Store:         store,
+		Conversations: conversations,
+		Embeddings:    FakeEmbeddingProvider{ProviderName: "fake", Dimensions: 8},
+	}
+}
+
+// WithEmbeddings replaces the default embedder (tests and main wiring).
+func (g *Gateway) WithEmbeddings(provider EmbeddingProvider) *Gateway {
+	if g != nil {
+		g.Embeddings = provider
+	}
+	return g
 }
 
 // ServeHTTP implements the initial internal HTTP API.
@@ -74,8 +92,16 @@ func (g *Gateway) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 		return
 	}
+	if isOpenAPIPath(request.URL.Path) {
+		g.handleOpenAPI(writer, request)
+		return
+	}
 	if request.Method == http.MethodPost && request.URL.Path == "/v1/generate" {
 		g.handleGenerate(writer, request, requestID)
+		return
+	}
+	if request.Method == http.MethodPost && request.URL.Path == "/v1/embeddings" {
+		g.handleEmbeddings(writer, request, requestID)
 		return
 	}
 	if request.Method == http.MethodPost && request.URL.Path == "/v1/conversations" {
@@ -233,9 +259,10 @@ func (g *Gateway) handleCreateConversation(writer http.ResponseWriter, request *
 	var input struct {
 		Title string `json:"title"`
 	}
+	// Empty body is allowed (title defaults to empty) so simple POSTs work.
 	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&input); err != nil {
+	if err := decoder.Decode(&input); err != nil && !errors.Is(err, io.EOF) {
 		writeError(writer, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
 		return
 	}
@@ -292,6 +319,50 @@ func (g *Gateway) handleGetRun(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	writeJSON(writer, http.StatusOK, view)
+}
+
+func (g *Gateway) handleEmbeddings(writer http.ResponseWriter, request *http.Request, requestID string) {
+	if g.Embeddings == nil {
+		writeError(writer, http.StatusServiceUnavailable, "not_ready", "embedding provider is not configured")
+		return
+	}
+	var input EmbeddingRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return
+	}
+	if len(input.Inputs) == 0 {
+		writeError(writer, http.StatusBadRequest, "invalid_request", "inputs are required")
+		return
+	}
+	ctx, span := g.telemetry().StartRequest(request.Context(), requestID)
+	defer span.End()
+	// reuse request counter with a synthetic task class for embeddings
+	g.telemetry().RecordStarted(ctx, "embed")
+	started := time.Now()
+	result, err := g.Embeddings.Embed(ctx, input)
+	if err != nil {
+		span.RecordError(err)
+		g.telemetry().RecordFailure(ctx, "embed")
+		status := http.StatusInternalServerError
+		code := "provider_error"
+		var pe *ProviderError
+		if errors.As(err, &pe) {
+			code = pe.Class
+			if pe.Class == "invalid_request" {
+				status = http.StatusBadRequest
+			}
+			if pe.Class == "auth" {
+				status = http.StatusUnauthorized
+			}
+		}
+		writeError(writer, status, code, "embedding request failed")
+		return
+	}
+	g.telemetry().RecordCompleted(ctx, "embed", result.Provider, started)
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func (g *Gateway) handleGenerate(writer http.ResponseWriter, request *http.Request, requestID string) {

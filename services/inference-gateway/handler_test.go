@@ -187,6 +187,16 @@ func TestGatewayCreatesAndGetsConversation(t *testing.T) {
 		t.Fatalf("created title = %q, want Planning", store.createdTitle)
 	}
 
+	// Empty body must create a conversation (title defaults to empty).
+	response, err = server.Client().Post(server.URL+"/v1/conversations", "application/json", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("empty-body create status = %d, want 201", response.StatusCode)
+	}
+
 	response, err = server.Client().Get(server.URL + "/v1/conversations/conversation-1")
 	if err != nil {
 		t.Fatal(err)
