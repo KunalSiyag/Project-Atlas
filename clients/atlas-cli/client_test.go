@@ -224,7 +224,7 @@ func TestCmdGenerateUsesClient(t *testing.T) {
 	server := gatewayishServer(t)
 	defer server.Close()
 	client := NewClient(server.URL)
-	code := cmdGenerate(t.Context(), client, "fake-model", "from-cmd", false)
+	code := cmdGenerate(t.Context(), client, "fake-model", "from-cmd", false, false)
 	if code != 0 {
 		t.Fatalf("exit = %d", code)
 	}

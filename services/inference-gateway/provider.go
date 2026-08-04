@@ -16,6 +16,26 @@ type ChatRequest struct {
 	TaskClass string            `json:"task_class,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	// Stream requests incremental output. The HTTP layer uses SSE when true;
+	// providers may implement StreamingModelProvider for native token streams.
+	Stream bool `json:"stream,omitempty"`
+}
+
+// StreamDelta is one incremental content fragment during a streaming generate.
+type StreamDelta struct {
+	Delta    string `json:"delta"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+// StreamEmit writes one delta to the client. Returning a non-nil error aborts the stream.
+type StreamEmit func(StreamDelta) error
+
+// StreamingModelProvider is an optional extension for native token streaming.
+// Providers that do not implement it still support stream=true via a synthesized
+// post-generate chunking path in streamGenerate.
+type StreamingModelProvider interface {
+	GenerateStream(ctx context.Context, request ChatRequest, emit StreamEmit) (ChatResponse, error)
 }
 
 // Usage contains provider-reported token counts when available.

@@ -31,6 +31,12 @@ func TestOpenAPIDocumentDescribesImplementedRoutes(t *testing.T) {
 	if !strings.Contains(doc, "/v1/embeddings") {
 		t.Fatal("openapi should list implemented /v1/embeddings path")
 	}
+	if !strings.Contains(doc, "stream:") && !strings.Contains(doc, "stream\n") && !strings.Contains(doc, "StreamDelta") {
+		t.Fatal("openapi should document stream generate / StreamDelta")
+	}
+	if !strings.Contains(doc, "text/event-stream") {
+		t.Fatal("openapi should mention text/event-stream for streaming generate")
+	}
 }
 
 func TestGatewayServesOpenAPI(t *testing.T) {

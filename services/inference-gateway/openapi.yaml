@@ -4,8 +4,8 @@ info:
   description: |
     Provider-independent chat inference API for Project Atlas.
     This document describes endpoints that are implemented in the Go service today.
-    Streaming is still planned. Chat, embeddings (batch), conversations, and runs are implemented.
-  version: 0.1.0
+    Chat (sync + SSE stream), embeddings (batch), conversations, and runs are implemented.
+  version: 0.2.0
 servers:
   - url: http://localhost:8080
     description: Local development default
@@ -60,7 +60,7 @@ paths:
   /v1/generate:
     post:
       operationId: generate
-      summary: One-shot chat generation
+      summary: One-shot chat generation (JSON or SSE when stream=true)
       parameters:
         - $ref: "#/components/parameters/RequestId"
       requestBody:
@@ -71,7 +71,10 @@ paths:
               $ref: "#/components/schemas/ChatRequest"
       responses:
         "200":
-          description: Normalized assistant response
+          description: |
+            When stream is false or omitted: application/json ChatResponse.
+            When stream is true: text/event-stream with events delta, done, and error.
+            delta data is StreamDelta; done data is ChatResponse; error data is ErrorEnvelope.
           headers:
             X-Request-ID:
               schema: { type: string }
@@ -81,6 +84,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ChatResponse"
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames (event + data lines)
         "400":
           $ref: "#/components/responses/Error"
         "500":
@@ -248,9 +255,19 @@ components:
           items: { $ref: "#/components/schemas/Message" }
         task_class: { type: string }
         model: { type: string }
+        stream:
+          type: boolean
+          description: When true, response is SSE (delta/done/error events)
         metadata:
           type: object
           additionalProperties: { type: string }
+    StreamDelta:
+      type: object
+      required: [delta]
+      properties:
+        delta: { type: string }
+        provider: { type: string }
+        model: { type: string }
     EmbeddingRequest:
       type: object
       required: [inputs]

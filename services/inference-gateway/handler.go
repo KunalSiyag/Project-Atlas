@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Gateway exposes provider-independent inference through HTTP.
@@ -404,6 +406,7 @@ func (g *Gateway) handleGenerate(writer http.ResponseWriter, request *http.Reque
 		"request_id", requestID,
 		"task_class", input.TaskClass,
 		"model", model,
+		"stream", input.Stream,
 	)
 	if g.Store != nil {
 		if err := g.Store.StartRun(ctx, InferenceRun{
@@ -421,6 +424,12 @@ func (g *Gateway) handleGenerate(writer http.ResponseWriter, request *http.Reque
 			return
 		}
 	}
+
+	if input.Stream {
+		g.handleGenerateStream(writer, ctx, span, input, provider, requestID, runID, started)
+		return
+	}
+
 	result, err := provider.Generate(ctx, input)
 	if err != nil {
 		span.RecordError(err)
@@ -459,6 +468,71 @@ func (g *Gateway) handleGenerate(writer http.ResponseWriter, request *http.Reque
 		"finish_reason", result.FinishReason,
 	)
 	writeJSON(writer, http.StatusOK, result)
+}
+
+// handleGenerateStream writes SSE events: delta*, done | error.
+func (g *Gateway) handleGenerateStream(
+	writer http.ResponseWriter,
+	ctx context.Context,
+	span trace.Span,
+	input ChatRequest,
+	provider ModelProvider,
+	requestID, runID string,
+	started time.Time,
+) {
+	sse, err := newSSEWriter(writer)
+	if err != nil {
+		g.telemetry().RecordFailure(ctx, input.TaskClass)
+		if g.Store != nil {
+			_ = g.Store.FailRun(ctx, runID, "internal", err.Error(), time.Now())
+		}
+		writeError(writer, http.StatusInternalServerError, "internal", "streaming is not supported on this connection")
+		return
+	}
+	sse.begin()
+
+	result, err := streamGenerate(ctx, provider, input, func(delta StreamDelta) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return sse.event("delta", delta)
+	})
+	if err != nil {
+		span.RecordError(err)
+		g.telemetry().RecordFailure(ctx, input.TaskClass)
+		g.logger().ErrorContext(ctx, "streaming inference failed",
+			"request_id", requestID,
+			"run_id", runID,
+			"error", err,
+		)
+		if g.Store != nil {
+			if storeErr := g.Store.FailRun(ctx, runID, errorClass(err), err.Error(), time.Now()); storeErr != nil {
+				g.logger().ErrorContext(ctx, "failed to persist stream failure", "request_id", requestID, "run_id", runID, "error", storeErr)
+			}
+		}
+		code := "provider_error"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			code = "timeout"
+		}
+		_ = sse.event("error", errorResponse{Error: errorBody{Code: code, Message: "inference request failed"}})
+		return
+	}
+
+	g.telemetry().RecordCompleted(ctx, input.TaskClass, result.Provider, started)
+	if g.Store != nil {
+		if err := g.Store.CompleteRun(ctx, runID, result, time.Now()); err != nil {
+			g.logger().ErrorContext(ctx, "failed to persist stream result", "request_id", requestID, "run_id", runID, "error", err)
+			_ = sse.event("error", errorResponse{Error: errorBody{Code: "persistence_error", Message: "inference result could not be persisted"}})
+			return
+		}
+	}
+	g.logger().InfoContext(ctx, "streaming inference completed",
+		"request_id", requestID,
+		"provider", result.Provider,
+		"model", result.Model,
+		"finish_reason", result.FinishReason,
+	)
+	_ = sse.event("done", result)
 }
 
 func (g *Gateway) logger() *slog.Logger {

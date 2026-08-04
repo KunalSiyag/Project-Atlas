@@ -76,6 +76,15 @@ func (p RetryingProvider) Generate(ctx context.Context, request ChatRequest) (Ch
 	return ChatResponse{}, lastErr
 }
 
+// GenerateStream does not retry. After the first delta is sent, a retry would
+// duplicate tokens; pre-stream failures should use non-streaming Generate.
+func (p RetryingProvider) GenerateStream(ctx context.Context, request ChatRequest, emit StreamEmit) (ChatResponse, error) {
+	if p.Provider == nil {
+		return ChatResponse{}, errors.New("retry provider has no underlying provider")
+	}
+	return streamGenerate(ctx, p.Provider, request, emit)
+}
+
 func isRetryable(err error) bool {
 	var providerErr *ProviderError
 	return errors.As(err, &providerErr) && providerErr.Retryable

@@ -37,7 +37,7 @@ Accepted
 11. ~~Tool steps / approvals~~ (echo, calculator, http_get, danger_echo + approve API).
 12. ~~Dynamic rule planner + memory + first RAG path + CLI `atlas run`~~.
 13. Richer LLM planner, real Redis short-term, production RAG quality.
-14. Streaming generate, eval harness, Compose OTEL/Grafana dashboards.
+14. ~~Streaming generate~~ (SSE on `POST /v1/generate`); eval harness, Compose OTEL/Grafana dashboards.
 
 ## Next
 - Context builder algorithm ADR (token budgeting strategy).

@@ -29,6 +29,7 @@ func run(args []string) int {
 	title := fs.String("title", "", "conversation title (chat mode)")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	autoApprove := fs.Bool("auto-approve", false, "auto-approve waiting_approval agent runs")
+	stream := fs.Bool("stream", false, "stream generate output via SSE (generate command)")
 	showVersion := fs.Bool("version", false, "print version and exit")
 
 	fs.Usage = func() {
@@ -58,6 +59,7 @@ Examples:
   atlas run "calculate 2+2 and summarize"
   atlas run -auto-approve "danger echo ship it"
   atlas generate "hello from the CLI"
+  atlas -stream generate "stream this reply"
   atlas health
 `)
 	}
@@ -95,7 +97,7 @@ Examples:
 			return 2
 		}
 		printBanner(os.Stdout, *baseURL, *model, color)
-		return cmdGenerate(ctx, client, *model, msg, color)
+		return cmdGenerate(ctx, client, *model, msg, color, *stream)
 	case "run", "agent", "goal":
 		goal := strings.TrimSpace(strings.Join(rest, " "))
 		if goal == "" {
@@ -156,20 +158,38 @@ func cmdHealth(ctx context.Context, client *Client, color bool) int {
 	return 0
 }
 
-func cmdGenerate(ctx context.Context, client *Client, model, msg string, color bool) int {
-	fmt.Fprintln(os.Stdout, colorize(color, dim, "  … thinking"))
-	result, err := client.Generate(ctx, GenerateRequest{
+func cmdGenerate(ctx context.Context, client *Client, model, msg string, color bool, stream bool) int {
+	req := GenerateRequest{
 		Messages:  []Message{{Role: "user", Content: msg}},
 		Model:     model,
 		TaskClass: "act",
-	})
+	}
+
+	var result GenerateResult
+	var err error
+	if stream {
+		fmt.Fprintln(os.Stdout, colorize(color, dim, "  … streaming"))
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(os.Stdout, colorize(color, bold+magenta, "atlas ›"))
+		fmt.Fprint(os.Stdout, "  ")
+		result, err = client.GenerateStream(ctx, req, func(d StreamDelta) error {
+			fmt.Fprint(os.Stdout, d.Delta)
+			return nil
+		})
+		fmt.Fprintln(os.Stdout)
+	} else {
+		fmt.Fprintln(os.Stdout, colorize(color, dim, "  … thinking"))
+		result, err = client.Generate(ctx, req)
+		if err == nil {
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(os.Stdout, colorize(color, bold+magenta, "atlas ›"))
+			fmt.Fprintln(os.Stdout, "  "+result.Message.Content)
+		}
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, colorize(color, red, "error: "+err.Error()))
 		return 1
 	}
-	fmt.Fprintln(os.Stdout)
-	fmt.Fprintln(os.Stdout, colorize(color, bold+magenta, "atlas ›"))
-	fmt.Fprintln(os.Stdout, "  "+result.Message.Content)
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintf(os.Stdout, "  %s %s  ·  %s %s  ·  %s %s\n",
 		colorize(color, dim, "provider"),

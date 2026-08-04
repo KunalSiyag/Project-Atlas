@@ -23,7 +23,7 @@ Atlas Core Engineering
 
 ## Status
 
-Implemented subset documented in OpenAPI; embeddings/stream still planned
+Implemented subset documented in OpenAPI (including SSE streaming generate)
 
 ## Last Updated
 
@@ -47,15 +47,27 @@ Request fields:
 - `tools[]` (optional): names and JSON schemas available to the model.
 - `temperature`, `max_tokens` (optional): bounded generation controls.
 - `metadata`: `workspace_id`, `conversation_id`, `run_id`, `step_id`, and request correlation data.
-- `stream` (optional): request incremental output where supported.
+- `stream` (optional): when `true`, the response is **SSE** (`text/event-stream`) instead of a single JSON body.
 
-Response fields:
+Response fields (non-streaming JSON):
 
 - `message`: normalized assistant content and optional tool calls.
 - `usage`: input/output token counts when known.
 - `provider`, `model`: resolved concrete identifiers.
 - `finish_reason`.
-- `request_id` and `latency_ms`.
+- `request_id` and `latency_ms` (headers / telemetry; not always duplicated in body).
+
+### Streaming (`stream: true`)
+
+Content-Type: `text/event-stream`. Events:
+
+| Event | Data payload |
+|-------|----------------|
+| `delta` | `{"delta":"...","provider":"...","model":"..."}` content fragment |
+| `done` | Full `ChatResponse` JSON (final assembled message + usage) |
+| `error` | `{"error":{"code":"...","message":"..."}}` if generation fails after the stream starts |
+
+Headers `X-Request-ID` and `X-Run-ID` are still set. Fake, Ollama, and OpenAI-compatible providers stream natively; other adapters synthesize chunks after a full generate.
 
 ## Create embeddings
 

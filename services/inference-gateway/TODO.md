@@ -46,6 +46,7 @@ Draft
 - [x] Add optional hosted adapters only after the conformance suite is green.
 - [x] Add embeddings HTTP path with fake (and OpenAI-compatible) embedders.
 - [x] Chat provider conformance suite (fake + OpenAI-style).
+- [x] Streaming generate via SSE (`stream: true` on `POST /v1/generate`).
 
 ## Notes
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -74,6 +75,14 @@ type GenerateRequest struct {
 	TaskClass string            `json:"task_class,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+	Stream    bool              `json:"stream,omitempty"`
+}
+
+// StreamDelta matches gateway SSE delta events.
+type StreamDelta struct {
+	Delta    string `json:"delta"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 type GenerateResult struct {
@@ -133,6 +142,7 @@ func (c *Client) Ready(ctx context.Context) (string, error) {
 }
 
 func (c *Client) Generate(ctx context.Context, req GenerateRequest) (GenerateResult, error) {
+	req.Stream = false
 	var out GenerateResult
 	status, headers, err := c.doJSON(ctx, http.MethodPost, "/v1/generate", req, &out.ChatResponse)
 	if err != nil {
@@ -144,6 +154,95 @@ func (c *Client) Generate(ctx context.Context, req GenerateRequest) (GenerateRes
 	out.RequestID = headers.Get("X-Request-ID")
 	out.RunID = headers.Get("X-Run-ID")
 	return out, nil
+}
+
+// GenerateStream calls POST /v1/generate with stream=true and invokes onDelta for each SSE delta.
+// The final assembled ChatResponse is returned from the done event.
+func (c *Client) GenerateStream(ctx context.Context, req GenerateRequest, onDelta func(StreamDelta) error) (GenerateResult, error) {
+	req.Stream = true
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/generate", bytes.NewReader(raw))
+	if err != nil {
+		return GenerateResult{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return GenerateResult{}, fmt.Errorf("stream request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	out := GenerateResult{
+		RequestID: resp.Header.Get("X-Request-ID"),
+		RunID:     resp.Header.Get("X-Run-ID"),
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		var ae apiErrorEnvelope
+		if json.Unmarshal(body, &ae) == nil && (ae.Error.Code != "" || ae.Error.Message != "") {
+			return out, fmt.Errorf("%s: %s", ae.Error.Code, ae.Error.Message)
+		}
+		return out, fmt.Errorf("stream generate failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var event string
+	var sawDone bool
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event: ") {
+			event = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		switch event {
+		case "delta":
+			var d StreamDelta
+			if err := json.Unmarshal([]byte(payload), &d); err != nil {
+				return out, fmt.Errorf("decode stream delta: %w", err)
+			}
+			if onDelta != nil {
+				if err := onDelta(d); err != nil {
+					return out, err
+				}
+			}
+		case "done":
+			if err := json.Unmarshal([]byte(payload), &out.ChatResponse); err != nil {
+				return out, fmt.Errorf("decode stream done: %w", err)
+			}
+			sawDone = true
+		case "error":
+			var ae apiErrorEnvelope
+			if json.Unmarshal([]byte(payload), &ae) == nil && ae.Error.Message != "" {
+				return out, fmt.Errorf("%s: %s", nonEmptyCLI(ae.Error.Code, "error"), ae.Error.Message)
+			}
+			return out, fmt.Errorf("stream error: %s", payload)
+		}
+		event = ""
+	}
+	if err := scanner.Err(); err != nil {
+		return out, fmt.Errorf("read stream: %w", err)
+	}
+	if !sawDone {
+		return out, fmt.Errorf("stream ended without done event")
+	}
+	return out, nil
+}
+
+func nonEmptyCLI(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }
 
 func (c *Client) CreateConversation(ctx context.Context, title string) (Conversation, error) {

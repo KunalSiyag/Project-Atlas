@@ -28,6 +28,7 @@ Keep a human-readable list. When versioned releases begin, adopt Keep a Changelo
 ## Unreleased
 
 ### Added
+- SSE streaming generate (`stream: true` on `POST /v1/generate`) with native fake/Ollama/OpenAI streams and CLI `-stream`.
 - Runnable inference gateway (`services/inference-gateway`) with fake/Ollama providers, HTTP APIs, retries, run + conversation Postgres stores.
 - OpenAPI 3 contract for implemented routes (`openapi.yaml`, served at `GET /openapi.yaml`), including embeddings.
 - OpenTelemetry SDK export (`ATLAS_OTEL_EXPORTER=none|console|otlp`).

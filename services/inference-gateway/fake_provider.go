@@ -38,3 +38,20 @@ func (p FakeProvider) Generate(ctx context.Context, request ChatRequest) (ChatRe
 		FinishReason: "stop",
 	}, nil
 }
+
+// GenerateStream emits the fake reply in small deltas for SSE testing.
+func (p FakeProvider) GenerateStream(ctx context.Context, request ChatRequest, emit StreamEmit) (ChatResponse, error) {
+	result, err := p.Generate(ctx, request)
+	if err != nil {
+		return ChatResponse{}, err
+	}
+	for _, part := range chunkText(result.Message.Content, 8) {
+		if err := ctx.Err(); err != nil {
+			return ChatResponse{}, err
+		}
+		if err := emit(StreamDelta{Delta: part, Provider: result.Provider, Model: result.Model}); err != nil {
+			return ChatResponse{}, err
+		}
+	}
+	return result, nil
+}
