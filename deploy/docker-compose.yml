@@ -26,6 +26,43 @@ services:
       retries: 10
     networks: [atlas]
 
+  # Agent orchestrator: runs + long-term memory on the same Compose Postgres.
+  # ATLAS_ORCHESTRATOR_DATABASE_URL enables OpenPostgresStore + OpenPostgresMemory
+  # (main.go): long memory is always Postgres when this URL is set and reachable.
+  agent-orchestrator:
+    build:
+      context: ../services/agent-orchestrator
+      dockerfile: Dockerfile
+    environment:
+      ATLAS_ORCHESTRATOR_ADDR: ":8090"
+      ATLAS_INFERENCE_GATEWAY_URL: http://inference-gateway:8080
+      ATLAS_INFERENCE_MODEL: ${ATLAS_INFERENCE_MODEL:-gemma3}
+      ATLAS_ORCHESTRATOR_DATABASE_URL: postgres://atlas:atlas-dev-password@postgres:5432/atlas?sslmode=disable
+      ATLAS_DATABASE_URL: postgres://atlas:atlas-dev-password@postgres:5432/atlas?sslmode=disable
+      ATLAS_QDRANT_URL: http://qdrant:6333
+      ATLAS_REDIS_URL: redis://redis:6379/0
+      ATLAS_PROMPTS_DIR: /prompts
+      ATLAS_WORKSPACE_ID: ${ATLAS_WORKSPACE_ID:-default}
+    ports:
+      - "${ORCHESTRATOR_PORT:-8090}:8090"
+    volumes:
+      - ../prompts:/prompts:ro
+    depends_on:
+      inference-gateway:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider --quiet http://127.0.0.1:8090/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks: [atlas]
+
   postgres:
     image: postgres:16-alpine
     environment:

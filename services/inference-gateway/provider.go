@@ -14,6 +14,8 @@ type Message struct {
 type ChatRequest struct {
 	Messages  []Message         `json:"messages"`
 	TaskClass string            `json:"task_class,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
+	APIKey    string            `json:"api_key,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	// Stream requests incremental output. The HTTP layer uses SSE when true;
@@ -61,5 +63,5 @@ type ModelProvider interface {
 
 // ModelRouter resolves a logical task class to a provider and concrete model.
 type ModelRouter interface {
-	Resolve(taskClass, requestedModel string) (ModelProvider, string, error)
+	Resolve(taskClass, requestedProvider, apiKey, requestedModel string) (ModelProvider, string, error)
 }

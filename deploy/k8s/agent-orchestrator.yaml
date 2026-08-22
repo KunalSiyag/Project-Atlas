@@ -1,0 +1,103 @@
+# Minimal production-oriented Deployment + Service for the agent orchestrator.
+# Apply: kubectl apply -f deploy/k8s/agent-orchestrator.yaml
+# Requires inference-gateway Service DNS and secrets (see deploy/README.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-orchestrator
+  labels:
+    app.kubernetes.io/name: agent-orchestrator
+    app.kubernetes.io/part-of: atlas
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agent-orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agent-orchestrator
+        app.kubernetes.io/part-of: atlas
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: agent-orchestrator
+          image: atlas/agent-orchestrator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8090
+              protocol: TCP
+          env:
+            - name: ATLAS_ORCHESTRATOR_ADDR
+              value: ":8090"
+            - name: ATLAS_INFERENCE_GATEWAY_URL
+              value: "http://inference-gateway:8080"
+            - name: ATLAS_INFERENCE_MODEL
+              value: "fake-model"
+            - name: ATLAS_PROMPTS_DIR
+              value: "/prompts"
+            - name: ATLAS_ORCHESTRATOR_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: atlas-orchestrator-secrets
+                  key: database-url
+                  optional: true
+            - name: ATLAS_REQUIRE_WORKSPACE
+              value: "1"
+          volumeMounts:
+            - name: prompts
+              mountPath: /prompts
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: prompts
+          configMap:
+            name: atlas-prompts
+            optional: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-orchestrator
+  labels:
+    app.kubernetes.io/name: agent-orchestrator
+    app.kubernetes.io/part-of: atlas
+spec:
+  selector:
+    app.kubernetes.io/name: agent-orchestrator
+  ports:
+    - name: http
+      port: 8090
+      targetPort: http
+  type: ClusterIP

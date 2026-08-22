@@ -14,8 +14,16 @@ type Service struct {
 	Planner   Planner
 	Memory    MemoryStore
 	Retriever Retriever
-	idFunc    func() string
-	now       func() time.Time
+	// Prompts is the multi-tenant durable prompt store (admin HTTP).
+	Prompts PromptStore
+	// PromptReg optional in-memory registry for resolve/hot-reload.
+	PromptReg *PromptRegistry
+	// Plugins is the remote/plugin tool catalog (marketplace discovery).
+	Plugins *PluginCatalog
+	// Tools registry (shared with executor).
+	Tools *ToolRegistry
+	idFunc func() string
+	now    func() time.Time
 }
 
 // ServiceConfig wires dependencies.
@@ -26,6 +34,9 @@ type ServiceConfig struct {
 	Tools       *ToolRegistry
 	Memory      MemoryStore
 	Retriever   Retriever
+	Prompts     PromptStore
+	PromptReg   *PromptRegistry
+	Plugins     *PluginCatalog
 	Planner     Planner
 	Model       string
 	TokenBudget int
@@ -70,20 +81,32 @@ func NewService(cfg ServiceConfig) *Service {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
+	plugins := cfg.Plugins
+	if plugins == nil {
+		plugins = NewPluginCatalog(tools)
+	}
+	// Prefer metered retriever for search SLA metrics when a plain retriever is passed.
+	retriever := cfg.Retriever
+	if retriever != nil {
+		if _, ok := retriever.(*MeteredRetriever); !ok {
+			retriever = NewMeteredRetriever(retriever)
+		}
+	}
 	exec := &Executor{
 		Store:       store,
 		Gateway:     cfg.Gateway,
 		Builder:     builder,
 		Tools:       tools,
 		Memory:      mem,
-		Retriever:   cfg.Retriever,
+		Retriever:   retriever,
 		Model:       cfg.Model,
 		TokenBudget: cfg.TokenBudget,
 		WorkspaceID: cfg.WorkspaceID,
 		UserID:      cfg.UserID,
 	}
 	return &Service{
-		Store: store, Executor: exec, Planner: planner, Memory: mem, Retriever: cfg.Retriever,
+		Store: store, Executor: exec, Planner: planner, Memory: mem, Retriever: retriever,
+		Prompts: cfg.Prompts, PromptReg: cfg.PromptReg, Plugins: plugins, Tools: tools,
 		idFunc: idFunc, now: now,
 	}
 }
@@ -120,6 +143,18 @@ func (s *Service) CreateRun(ctx context.Context, goal string) (Run, error) {
 // GetRun returns the current run snapshot.
 func (s *Service) GetRun(ctx context.Context, runID string) (Run, error) {
 	return s.Store.GetRun(ctx, runID)
+}
+
+// ListEvents returns lifecycle events for a run via the store ListEvents path.
+// Returns an error if the run does not exist (callers map to 404).
+func (s *Service) ListEvents(ctx context.Context, runID string) ([]Event, error) {
+	if s == nil || s.Store == nil {
+		return nil, errors.New("orchestrator not configured")
+	}
+	if _, err := s.Store.GetRun(ctx, runID); err != nil {
+		return nil, err
+	}
+	return s.Store.ListEvents(ctx, runID)
 }
 
 // StartRun executes (or resumes) the plan.

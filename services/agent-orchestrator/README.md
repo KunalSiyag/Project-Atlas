@@ -42,6 +42,8 @@ cd clients/atlas-cli && go build -o atlas .
 - `POST /v1/runs/{id}/start`
 - `POST /v1/runs/{id}/approve` | `/reject` | `/cancel`
 - `GET /v1/runs/{id}`
+- `GET /v1/runs/{id}/events` lifecycle events from the store
+- `GET /openapi.yaml` embedded OpenAPI (`/openapi.yml`, `/v1/openapi.yaml`)
 - `POST /v1/knowledge/ingest` `{ "title", "content" }`
 - `POST /v1/memory` long-term fact
 
@@ -51,7 +53,7 @@ cd clients/atlas-cli && go build -o atlas .
 |----------|---------|
 | `ATLAS_ORCHESTRATOR_ADDR` | `:8090` |
 | `ATLAS_INFERENCE_GATEWAY_URL` | `http://127.0.0.1:8080` |
-| `ATLAS_ORCHESTRATOR_DATABASE_URL` | empty → memory runs |
+| `ATLAS_ORCHESTRATOR_DATABASE_URL` | empty → memory runs; when set, Postgres runs **and** long-term memory (`OpenPostgresMemory`) |
 | `ATLAS_QDRANT_URL` | `http://127.0.0.1:6333` |
 | `ATLAS_REDIS_URL` | empty → in-process short-term; `redis://host:6379/0` for Redis |
 | `ATLAS_PROMPTS_DIR` | empty → auto-discover `./prompts`; file-backed prompt registry |

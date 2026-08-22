@@ -511,6 +511,57 @@ func (q *QdrantRetriever) Search(ctx context.Context, query string, topK int) ([
 	return out, nil
 }
 
+// ListDocuments implements CorpusOps via the dual-write Fallback (always populated on Ingest).
+// This is the shipped knowledge path used by main (NewQdrantRetriever).
+func (q *QdrantRetriever) ListDocuments(ctx context.Context) ([]Document, error) {
+	if q == nil || q.Fallback == nil {
+		return nil, fmt.Errorf("qdrant fallback not configured")
+	}
+	return q.Fallback.ListDocuments(ctx)
+}
+
+// DeleteDocument removes the doc from Fallback and best-effort from Qdrant.
+func (q *QdrantRetriever) DeleteDocument(ctx context.Context, id string) error {
+	if q == nil {
+		return fmt.Errorf("qdrant retriever is nil")
+	}
+	var fbErr error
+	if q.Fallback != nil {
+		fbErr = q.Fallback.DeleteDocument(ctx, id)
+	}
+	// Best-effort remote delete (points/delete). Unreachable Qdrant is fine — Fallback is source of truth for local ops.
+	if q.BaseURL != "" && q.Client != nil {
+		body, _ := json.Marshal(map[string]any{
+			"points": []string{id},
+		})
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			q.BaseURL+"/collections/"+q.Collection+"/points/delete?wait=true", bytes.NewReader(body))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			if resp, err := q.Client.Do(req); err == nil {
+				resp.Body.Close()
+			}
+		}
+	}
+	if fbErr != nil {
+		return fbErr
+	}
+	if q.Fallback == nil {
+		return fmt.Errorf("delete document not supported")
+	}
+	return nil
+}
+
+// CorpusStatus reports counts from Fallback (dual-write path) with backend label.
+func (q *QdrantRetriever) CorpusStatus(ctx context.Context) CorpusStatus {
+	if q == nil || q.Fallback == nil {
+		return CorpusStatus{Backend: "qdrant"}
+	}
+	st := q.Fallback.CorpusStatus(ctx)
+	st.Backend = "qdrant+fallback"
+	return st
+}
+
 // DocSnippets converts retrieval hits to context-builder notes (includes source/score).
 func DocSnippets(docs []Document) []string {
 	var out []string

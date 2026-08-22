@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -207,4 +208,166 @@ func TestHTTPGetTool(t *testing.T) {
 	if err != nil || !strings.Contains(out, "pong") {
 		t.Fatalf("%q %v", out, err)
 	}
+}
+
+func TestToolAuthzDenyDoesNotExecute(t *testing.T) {
+	executed := false
+	spy := &spyTool{
+		name: "secret_tool",
+		fn: func(ctx context.Context, input map[string]any) (string, error) {
+			executed = true
+			return "SHOULD_NOT_RUN", nil
+		},
+	}
+	reg := NewToolRegistry(spy, EchoTool{}).WithAuthorizer(AllowlistAuthorizer{
+		Allowed: map[string]bool{"echo": true},
+	})
+	// Denied tool: body must not run.
+	_, err := reg.Invoke(context.Background(), "secret_tool", map[string]any{"text": "x"}, InvokeOptions{
+		Approved: true, WorkspaceID: "ws-1",
+	})
+	if err == nil {
+		t.Fatal("expected denied")
+	}
+	var te *ToolError
+	if !errors.As(err, &te) || te.Class != ToolErrDenied {
+		t.Fatalf("want denied ToolError, got %v", err)
+	}
+	if executed {
+		t.Fatal("denied tool body executed")
+	}
+	// Allowed tool still works through real Invoke path.
+	out, err := reg.Invoke(context.Background(), "echo", map[string]any{"text": "ok"}, InvokeOptions{Approved: true})
+	if err != nil || out != "ok" {
+		t.Fatalf("%q %v", out, err)
+	}
+}
+
+func TestRegisterRemoteHTTPToolViaDescriptor(t *testing.T) {
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method %s", r.Method)
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		_, _ = w.Write([]byte(`REMOTE_PLUGIN_OK`))
+	}))
+	defer srv.Close()
+
+	reg := NewToolRegistry() // no built-ins — non-default tool only
+	err := reg.RegisterDescriptor(ToolDescriptor{
+		Name:        "remote_echo_plugin",
+		Kind:        "http",
+		URL:         srv.URL,
+		Description: "test remote plugin",
+		InputSchema: map[string]any{
+			"required":   []string{"payload"},
+			"properties": map[string]any{"payload": map[string]any{"type": "string"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Invoke the registered non-default tool through shipped Registry.Invoke.
+	out, err := reg.Invoke(context.Background(), "remote_echo_plugin", map[string]any{"payload": "hi-plugin"}, InvokeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "REMOTE_PLUGIN_OK" {
+		t.Fatalf("out=%q", out)
+	}
+	if !strings.Contains(gotBody, "hi-plugin") {
+		t.Fatalf("remote body=%q", gotBody)
+	}
+	// Unknown kind rejected (WASM not supported on this path).
+	err = reg.RegisterDescriptor(ToolDescriptor{Name: "wasm_x", Kind: "wasm", URL: "x"})
+	if err == nil {
+		t.Fatal("expected wasm kind rejected")
+	}
+}
+
+func TestGitHubAndSlackAdaptersHTTP(t *testing.T) {
+	var ghPath, ghAuth, ghBody string
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ghPath = r.URL.Path
+		ghAuth = r.Header.Get("Authorization")
+		b, _ := io.ReadAll(r.Body)
+		ghBody = string(b)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"number": 42, "title": "hi", "html_url": "https://example.test/issues/42",
+		})
+	}))
+	defer gh.Close()
+
+	var slackPath, slackAuth, slackBody string
+	sl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slackPath = r.URL.Path
+		slackAuth = r.Header.Get("Authorization")
+		b, _ := io.ReadAll(r.Body)
+		slackBody = string(b)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "ts": "123.456"})
+	}))
+	defer sl.Close()
+
+	reg := NewToolRegistry(
+		GitHubIssueTool{BaseURL: gh.URL, Token: "ghtoken", Client: gh.Client()},
+		SlackPostMessageTool{BaseURL: sl.URL, Token: "xoxb-test", Client: sl.Client()},
+	)
+	out, err := reg.Invoke(context.Background(), "github_create_issue", map[string]any{
+		"owner": "acme", "repo": "atlas", "title": "hi", "body": "details",
+	}, InvokeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "#42") || !strings.Contains(out, "issues/42") {
+		t.Fatalf("github out=%q", out)
+	}
+	if ghPath != "/repos/acme/atlas/issues" {
+		t.Fatalf("github path=%q", ghPath)
+	}
+	if ghAuth != "Bearer ghtoken" {
+		t.Fatalf("github auth=%q", ghAuth)
+	}
+	if !strings.Contains(ghBody, `"title":"hi"`) {
+		t.Fatalf("github body=%q", ghBody)
+	}
+
+	out, err = reg.Invoke(context.Background(), "slack_post_message", map[string]any{
+		"channel": "C123", "text": "hello atlas",
+	}, InvokeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "ts=123.456") {
+		t.Fatalf("slack out=%q", out)
+	}
+	if slackPath != "/chat.postMessage" {
+		t.Fatalf("slack path=%q", slackPath)
+	}
+	if slackAuth != "Bearer xoxb-test" {
+		t.Fatalf("slack auth=%q", slackAuth)
+	}
+	if !strings.Contains(slackBody, "hello atlas") {
+		t.Fatalf("slack body=%q", slackBody)
+	}
+}
+
+type spyTool struct {
+	name string
+	fn   func(ctx context.Context, input map[string]any) (string, error)
+}
+
+func (s *spyTool) Name() string                   { return s.name }
+func (s *spyTool) Description() string            { return "spy" }
+func (s *spyTool) RequiresApproval() bool         { return false }
+func (s *spyTool) Timeout() time.Duration         { return 2 * time.Second }
+func (s *spyTool) InputSchema() map[string]any {
+	return map[string]any{
+		"required":   []string{"text"},
+		"properties": map[string]any{"text": map[string]any{"type": "string"}},
+	}
+}
+func (s *spyTool) Execute(ctx context.Context, input map[string]any) (string, error) {
+	return s.fn(ctx, input)
 }

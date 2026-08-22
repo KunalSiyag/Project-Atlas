@@ -21,6 +21,9 @@ Accepted
 ## Last Updated
 2026-08-05
 
+## Implementation note (acceptance closed)
+All default built-ins (`EchoTool`, `CalculatorTool`, `HTTPGetTool`, `DangerEchoTool`) implement the `Tool` interface and register via `DefaultToolRegistry()`. Eval fixture type `tool_success` in `tools/atlas-eval` invokes tools **by name** through `ToolRegistry.Invoke` (see `fixtures/eval/v1/sample.json` cases `tool-calculator-success`, `tool-echo-success`).
+
 ## Related Documents
 - [ADR 0003 Architecture Style](../adr/0003-architecture-style.md)
 - [Domain: Tool](../domain/tool.md)
@@ -68,8 +71,8 @@ Built-ins today (`echo`, `calculator`, `http_get`, `danger_echo`) should be re-e
 
 ## Acceptance Criteria
 - [x] RFC documents interface, error classes, approval semantics.
-- [ ] At least one built-in tool refactored to explicit Tool interface (follow-up implementation task).
-- [ ] Eval fixture type can assert tool success by name (orchestrator tests cover calculator today).
+- [x] At least one built-in tool refactored to explicit Tool interface (follow-up implementation task).
+- [x] Eval fixture type can assert tool success by name (orchestrator tests cover calculator today).
 
 ## Non-Goals
 - WASM/remote tool hosting.

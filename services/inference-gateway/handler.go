@@ -98,6 +98,10 @@ func (g *Gateway) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		g.handleOpenAPI(writer, request)
 		return
 	}
+	if request.Method == http.MethodGet && request.URL.Path == "/v1/models" {
+		g.handleListModels(writer, request)
+		return
+	}
 	if request.Method == http.MethodPost && request.URL.Path == "/v1/generate" {
 		g.handleGenerate(writer, request, requestID)
 		return
@@ -146,6 +150,8 @@ func (g *Gateway) handlePostConversationMessage(writer http.ResponseWriter, requ
 	var input struct {
 		Content   string            `json:"content"`
 		TaskClass string            `json:"task_class,omitempty"`
+		Provider  string            `json:"provider,omitempty"`
+		APIKey    string            `json:"api_key,omitempty"`
 		Model     string            `json:"model,omitempty"`
 		Metadata  map[string]string `json:"metadata,omitempty"`
 	}
@@ -164,7 +170,7 @@ func (g *Gateway) handlePostConversationMessage(writer http.ResponseWriter, requ
 		writeError(writer, http.StatusInternalServerError, "persistence_error", "conversation could not be loaded")
 		return
 	}
-	provider, model, err := g.Router.Resolve(input.TaskClass, input.Model)
+	provider, model, err := g.Router.Resolve(input.TaskClass, input.Provider, input.APIKey, input.Model)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -385,7 +391,7 @@ func (g *Gateway) handleGenerate(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	provider, model, err := g.Router.Resolve(input.TaskClass, input.Model)
+	provider, model, err := g.Router.Resolve(input.TaskClass, input.Provider, input.APIKey, input.Model)
 	if err != nil {
 		writeError(writer, http.StatusBadRequest, "invalid_request", err.Error())
 		return
@@ -570,6 +576,45 @@ type errorBody struct {
 
 func writeError(writer http.ResponseWriter, status int, code, message string) {
 	writeJSON(writer, status, errorResponse{Error: errorBody{Code: code, Message: message}})
+}
+
+func (g *Gateway) handleListModels(writer http.ResponseWriter, request *http.Request) {
+	providerName := strings.ToLower(strings.TrimSpace(request.URL.Query().Get("provider")))
+	apiKey := strings.TrimSpace(request.URL.Query().Get("api_key"))
+
+	if providerName == "nvidia" {
+		baseURL := "https://integrate.api.nvidia.com/v1/models"
+		req, err := http.NewRequestWithContext(request.Context(), http.MethodGet, baseURL, nil)
+		if err != nil {
+			writeError(writer, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeError(writer, http.StatusBadGateway, "provider_error", err.Error())
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(resp.StatusCode)
+		_, _ = writer.Write(body)
+		return
+	}
+
+	// Default fallback model list
+	models := []map[string]string{
+		{"id": "meta/llama-3.1-70b-instruct", "provider": "nvidia"},
+		{"id": "meta/llama-3.3-70b-instruct", "provider": "nvidia"},
+		{"id": "gpt-4o", "provider": "openai"},
+		{"id": "gpt-4o-mini", "provider": "openai"},
+		{"id": "llama3", "provider": "ollama"},
+		{"id": "fake-model", "provider": "fake"},
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"data": models})
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {

@@ -15,14 +15,15 @@ This repository is the source of truth for Atlas product documentation, architec
 Atlas Core Engineering
 
 ## Status
-M0 Foundation Complete · M1 in progress (inference gateway + atlas-cli runnable)
+M0–M1 foundation + gateway shipped · M2/M3 orchestrator slice shipped (runs, tools, memory/RAG, eval) · M3–M5 exit work still open (plugin SDK/authz, knowledge SLAs, production hardening)
 
 ## Last Updated
-2026-08-04
+2026-08-05
 
 ## Related Documents
 - [AI Context](./AI_CONTEXT.md)
-- [**Beginner build record (how Go / CLI / Postgres connect)**](./docs/engineering/BEGINNER_BUILD_RECORD.md)
+- [**Complete Beginner Guide (no Go experience required)**](./docs/engineering/COMPLETE_BEGINNER_GUIDE.md)
+- [Beginner build record (pointer)](./docs/engineering/BEGINNER_BUILD_RECORD.md)
 - [Product Vision](./docs/product/VISION.md)
 - [Product Index](./docs/product/README.md)
 - [Domain Language](./docs/domain/README.md)
@@ -41,12 +42,16 @@ Atlas is not another chatbot. It is a modular platform for production agent syst
 
 The LLM is a dependency. The product is everything around it: auth, gateway, context building, planning, workflows, tools, model routing, guardrails, evaluation, and observability.
 
-## Foundation status (M0)
-**M0 documentation foundation is complete.** The repository is set up as an engineering organization: product constitution, domain language, subsystem architecture, foundation ADRs, management tracking, and contracts/schemas/tasks indexes.
+## Platform status
+**M0 documentation foundation is complete.** Product constitution, domain language, subsystem architecture, foundation ADRs, management tracking, and contracts/schemas/tasks indexes are in place.
 
-**M0 is documentation-complete.** M1 runtime has started: a Go **inference gateway**, **Docker Compose** data plane, and a terminal **atlas-cli** for local testing. Full agent orchestrator and production deploy are still ahead.
+**M1 core platform is largely shipped:** Go **inference gateway** (chat, embeddings, OTEL), **Docker Compose** data plane, and terminal **atlas-cli**.
 
-**Quick try (fake model, no Docker):** `make gateway-run` in one terminal, then `make cli-generate MSG='hello'` in another. See the [beginner build record](./docs/engineering/BEGINNER_BUILD_RECORD.md).
+**M2/M3 intelligence + tools slice is shipped in-repo:** **agent-orchestrator** (plan DAG, tools/approvals, memory/RAG ports, Postgres runs, HTTP + OpenAPI, list-events), prompt registry, Tool SDK built-ins, and offline **atlas-eval** harness. Still open toward milestone exit: plugin SDK beyond in-process tools and a fuller tool **authz** story (M3), corpus ops / search SLAs (M4), eval gates in CI, security hardening, deploy docs, runbooks, and load/bench dashboards (M5). Multi-region HA and WASM/remote plugins remain icebox.
+
+**Quick try (fake model, no Docker):** `make gateway-run` in one terminal, then `make cli-generate MSG='hello'` in another.
+
+**New to Go / this repo?** Read the [Complete Beginner Guide](./docs/engineering/COMPLETE_BEGINNER_GUIDE.md) first (step-by-step, glossary, architecture, troubleshooting).
 
 ## Development Order
 All meaningful implementation follows this sequence:
@@ -78,9 +83,11 @@ tasks/              Numbered engineering tasks
 deploy/             Docker Compose local data plane (+ fake overlay)
 services/
   inference-gateway/   Runnable Go inference HTTP service (chat, embeddings, OTEL)
-  agent-orchestrator/  First Go orchestration slice (in-memory runs + HTTP)
+  agent-orchestrator/  Orchestration slice (runs, tools, memory/RAG, Postgres, OpenAPI)
 clients/
-  atlas-cli/           Terminal console (ATLAS banner + chat)
+  atlas-cli/           Terminal console (ATLAS banner + chat + run)
+tools/
+  atlas-eval/          Offline eval harness
 Makefile            gateway-run / cli-run / test helpers
 ```
 

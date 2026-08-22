@@ -18,7 +18,7 @@ Atlas Core Engineering
 Bootstrap
 
 ## Last Updated
-2026-08-04
+2026-08-05
 
 ## Related Documents
 - [Sprints](../management/SPRINTS.md)
@@ -40,4 +40,6 @@ Each task should include:
 | [0002](./0002-inference-gateway-docs.md) | Inference gateway service documentation pack | Done (docs present) |
 | [0003](./0003-core-schemas-and-contracts.md) | Core schemas and contracts | Done (files present) |
 | [0004](./0004-openapi-and-cli-inspect.md) | OpenAPI + CLI run/conversation/openapi | Done |
-| [0003](./0003-core-schemas-and-contracts.md) | Expand core schemas and provider contracts | Planned |
+| [0005](./0005-agent-orchestrator-docs-and-contracts.md) | Agent orchestrator docs, OpenAPI, ADR, events, RFC close | Done |
+| [0006](./0006-agent-orchestrator-remaining.md) | Agent orchestrator remaining (a–e Done; f–g Icebox) | Partial complete |
+| [0003](./0003-core-schemas-and-contracts.md) | Expand core schemas and provider contracts | Deferred (core schemas + contracts present; extra entity schemas later) |

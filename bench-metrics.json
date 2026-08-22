@@ -1,0 +1,15 @@
+{
+  "target": "http://127.0.0.1:18080",
+  "path": "/healthz",
+  "requests": 40,
+  "concurrency": 8,
+  "successes": 40,
+  "failures": 0,
+  "duration_sec": 1.06323708,
+  "throughput_rps": 37.62096032241464,
+  "latency_p50_ms": 1.024,
+  "latency_p95_ms": 10.389,
+  "latency_p99_ms": 10.641,
+  "error_ratio": 0,
+  "generated_at": "2026-08-04T20:42:40Z"
+}

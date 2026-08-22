@@ -74,6 +74,30 @@
       "expect": {
         "contains": ["atlas eval", "online"]
       }
+    },
+    {
+      "id": "tool-calculator-success",
+      "type": "tool_success",
+      "description": "Assert calculator tool succeeds by name via registry Invoke (RFC 0001)",
+      "input": {
+        "tool": "calculator",
+        "input": { "expression": "21+21" }
+      },
+      "expect": {
+        "equals": "42"
+      }
+    },
+    {
+      "id": "tool-echo-success",
+      "type": "tool_success",
+      "description": "Assert echo tool success by name",
+      "input": {
+        "tool": "echo",
+        "input": { "text": "atlas-ok" }
+      },
+      "expect": {
+        "equals": "atlas-ok"
+      }
     }
   ]
 }

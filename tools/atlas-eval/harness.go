@@ -118,6 +118,8 @@ func scoreCase(c Case, opts Options) CaseResult {
 		pass, msg, err = scoreRAGRank(c)
 	case "string_contains":
 		pass, msg, err = scoreStringContains(c)
+	case "tool_success":
+		pass, msg, err = scoreToolSuccess(c)
 	case "llm_judge":
 		pass, score, msg, err = scoreLLMJudge(c, opts.Judge)
 	default:
@@ -281,6 +283,51 @@ func scoreStringContains(c Case) (bool, string, error) {
 		}
 	}
 	return true, "ok", nil
+}
+
+// scoreToolSuccess invokes a registered built-in tool by name via ToolRegistry.Invoke
+// (RFC 0001). Does not re-implement tool logic; asserts success (and optional output).
+func scoreToolSuccess(c Case) (bool, string, error) {
+	var in struct {
+		Tool    string         `json:"tool"`
+		Input   map[string]any `json:"input"`
+		Approve bool           `json:"approve"`
+	}
+	var exp struct {
+		// Equals exact output match when non-empty.
+		Equals string `json:"equals"`
+		// Contains substrings that must appear in tool output.
+		Contains []string `json:"contains"`
+	}
+	if err := json.Unmarshal(c.Input, &in); err != nil {
+		return false, "", err
+	}
+	if err := json.Unmarshal(c.Expect, &exp); err != nil {
+		return false, "", err
+	}
+	name := strings.TrimSpace(in.Tool)
+	if name == "" {
+		return false, "", fmt.Errorf("tool name is required")
+	}
+	reg := orchestrator.DefaultToolRegistry()
+	if _, ok := reg.Get(name); !ok {
+		return false, fmt.Sprintf("unknown tool %q", name), nil
+	}
+	out, err := reg.Invoke(context.Background(), name, in.Input, orchestrator.InvokeOptions{
+		Approved: in.Approve,
+	})
+	if err != nil {
+		return false, fmt.Sprintf("tool %q failed: %v", name, err), nil
+	}
+	if exp.Equals != "" && out != exp.Equals {
+		return false, fmt.Sprintf("tool %q output %q want equals %q", name, out, exp.Equals), nil
+	}
+	for _, needle := range exp.Contains {
+		if !strings.Contains(out, needle) {
+			return false, fmt.Sprintf("tool %q output missing %q (got %q)", name, needle, out), nil
+		}
+	}
+	return true, fmt.Sprintf("tool=%s ok", name), nil
 }
 
 func scoreLLMJudge(c Case, judge orchestrator.Judge) (bool, float64, string, error) {

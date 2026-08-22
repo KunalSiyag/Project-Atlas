@@ -1,0 +1,115 @@
+{
+  "version": "1",
+  "name": "atlas-m3-extended-eval",
+  "description": "Expanded deterministic suite beyond smoke: more tool_success, rule_plan, plan_json, and string_contains cases driving real scorers",
+  "cases": [
+    {
+      "id": "tool-calc-mul",
+      "type": "tool_success",
+      "description": "Calculator multiply via registry Invoke by name",
+      "input": {
+        "tool": "calculator",
+        "input": { "expression": "7*6" }
+      },
+      "expect": {
+        "equals": "42"
+      }
+    },
+    {
+      "id": "tool-calc-sub",
+      "type": "tool_success",
+      "description": "Calculator subtract success by name",
+      "input": {
+        "tool": "calculator",
+        "input": { "expression": "100-58" }
+      },
+      "expect": {
+        "equals": "42"
+      }
+    },
+    {
+      "id": "tool-echo-phrase",
+      "type": "tool_success",
+      "description": "Echo tool success by name",
+      "input": {
+        "tool": "echo",
+        "input": { "text": "extended-suite-ok" }
+      },
+      "expect": {
+        "equals": "extended-suite-ok",
+        "contains": ["extended-suite"]
+      }
+    },
+    {
+      "id": "tool-danger-approved",
+      "type": "tool_success",
+      "description": "danger_echo succeeds when approve flag is set",
+      "input": {
+        "tool": "danger_echo",
+        "approve": true,
+        "input": { "text": "payload" }
+      },
+      "expect": {
+        "contains": ["DANGER_OK", "payload"]
+      }
+    },
+    {
+      "id": "plan-echo-tool",
+      "type": "rule_plan",
+      "description": "Rule planner emits echo tool for echo goals",
+      "input": {
+        "goal": "please echo the word atlas"
+      },
+      "expect": {
+        "has_tool": "echo",
+        "min_steps": 3,
+        "kinds": ["context", "tool", "finalize"]
+      }
+    },
+    {
+      "id": "plan-http-tool",
+      "type": "rule_plan",
+      "description": "Rule planner emits http_get for http goals",
+      "input": {
+        "goal": "please http get the status page for the user"
+      },
+      "expect": {
+        "has_tool": "http_get",
+        "kinds": ["context", "tool"]
+      }
+    },
+    {
+      "id": "plan-json-tool-step-valid",
+      "type": "plan_json",
+      "description": "Plan with tool step validates",
+      "input": {
+        "plan_json": "[{\"step_id\":\"prepare\",\"name\":\"prepare_context\",\"kind\":\"context\"},{\"step_id\":\"tool_1\",\"name\":\"calc\",\"kind\":\"tool\",\"depends_on\":[\"prepare\"],\"tool_name\":\"calculator\",\"tool_input\":{\"expression\":\"1+1\"}},{\"step_id\":\"finalize\",\"name\":\"return_answer\",\"kind\":\"finalize\",\"depends_on\":[\"tool_1\"]}]"
+      },
+      "expect": {
+        "valid": true
+      }
+    },
+    {
+      "id": "plan-json-missing-tool-name",
+      "type": "plan_json",
+      "description": "Tool step without tool_name is invalid",
+      "input": {
+        "plan_json": "[{\"step_id\":\"t\",\"name\":\"t\",\"kind\":\"tool\"}]"
+      },
+      "expect": {
+        "valid": false
+      }
+    },
+    {
+      "id": "string-extended-marker",
+      "type": "string_contains",
+      "description": "Harness plumbing for extended suite",
+      "input": {
+        "text": "atlas extended eval suite is online"
+      },
+      "expect": {
+        "contains": ["extended eval", "online"]
+      }
+    }
+  ]
+}

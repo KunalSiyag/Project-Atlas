@@ -39,3 +39,4 @@ Create an ADR when a decision has long-term architectural consequences, establis
 | [0007](./0007-testing-philosophy.md) | Testing philosophy | Accepted |
 | [0008](./0008-opentelemetry.md) | OpenTelemetry for observability | Accepted |
 | [0009](./0009-context-builder-token-budgeting.md) | Context builder token budgeting | Accepted |
+| [0010](./0010-orchestration-state-machine.md) | Orchestration run/step state machine | Accepted |

@@ -15,24 +15,24 @@ JSON Schema (or equivalent) documents for shared entities. Service-specific mode
 Atlas Architecture
 
 ## Status
-Bootstrap
+Bootstrap (core entity schemas present; extra entities deferred — see task 0003)
 
 ## Last Updated
-2026-08-03
+2026-08-05
 
 ## Related Documents
 - [Storage Architecture](../docs/architecture/storage.md)
 
-## Planned Schemas (M1+)
-| Schema | Entity |
-|--------|--------|
-| [conversation.schema.json](./conversation.schema.json) | Conversation + turns |
-| [workspace.schema.json](./workspace.schema.json) | Workspace |
-| [tool.schema.json](./tool.schema.json) | Tool descriptor |
-| [memory.schema.json](./memory.schema.json) | Memory entry |
-| [prompt.schema.json](./prompt.schema.json) | Versioned prompt |
-| [provider.schema.json](./provider.schema.json) | Provider binding config |
-| [run.schema.json](./run.schema.json) | Workflow run |
+## Schemas
+| Schema | Entity | Status |
+|--------|--------|--------|
+| [conversation.schema.json](./conversation.schema.json) | Conversation + turns | Present |
+| [workspace.schema.json](./workspace.schema.json) | Workspace | Present |
+| [run.schema.json](./run.schema.json) | Workflow run | Present |
+| tool.schema.json | Tool descriptor | Deferred (task 0003) |
+| memory.schema.json | Memory entry | Deferred (task 0003) |
+| prompt.schema.json | Versioned prompt | Deferred (task 0003) |
+| provider.schema.json | Provider binding config | Deferred (task 0003) |
 
 ## Rules
 - Schemas version via `$id` and file naming.

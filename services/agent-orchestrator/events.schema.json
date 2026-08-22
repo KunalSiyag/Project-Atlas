@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://atlas.local/schemas/orchestrator-events.schema.json",
+  "title": "Atlas Agent Orchestrator Lifecycle Event",
+  "description": "Machine-readable shape for RunStore.AppendEvent records emitted by service.go and executor.go. Not a public HTTP list API today.",
+  "type": "object",
+  "required": ["event_id", "run_id", "type", "message", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "description": "Unique event identifier"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Parent run identifier"
+    },
+    "step_id": {
+      "type": "string",
+      "description": "Optional step this event refers to"
+    },
+    "type": {
+      "type": "string",
+      "description": "Lifecycle event type (stable strings for telemetry and tests)",
+      "enum": [
+        "run_created",
+        "run_started",
+        "step_started",
+        "step_succeeded",
+        "step_retry",
+        "waiting_approval",
+        "approved",
+        "rejected",
+        "run_succeeded",
+        "run_failed",
+        "run_cancelled"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable detail (goal text, error, ok, etc.)"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp"
+    }
+  },
+  "examples": [
+    {
+      "event_id": "evt_01",
+      "run_id": "run_01",
+      "type": "run_created",
+      "message": "calculate 21+21",
+      "created_at": "2026-08-05T12:00:00Z"
+    },
+    {
+      "event_id": "evt_02",
+      "run_id": "run_01",
+      "step_id": "tool_1",
+      "type": "step_started",
+      "message": "attempt 1/2",
+      "created_at": "2026-08-05T12:00:01Z"
+    }
+  ],
+  "x-atlas-emitters": {
+    "run_created": "Service.CreateRun",
+    "run_started": "Executor.ExecuteRun",
+    "step_started": "Executor.runStep",
+    "step_succeeded": "Executor.runStep (success path)",
+    "step_retry": "Executor.runStep (retry re-queue)",
+    "waiting_approval": "Executor.runStep (tool gate)",
+    "approved": "Service.ApproveRun",
+    "rejected": "Service.RejectRun",
+    "run_succeeded": "Executor.succeedRun",
+    "run_failed": "Executor.failRun",
+    "run_cancelled": "Executor.cancelRun"
+  }
+}

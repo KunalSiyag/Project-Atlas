@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"time"
 )
 
 const version = "0.1.0"
@@ -25,7 +26,9 @@ func run(args []string) int {
 
 	baseURL := fs.String("url", envOr("ATLAS_GATEWAY_URL", "http://localhost:8080"), "inference gateway base URL")
 	orchURL := fs.String("orch-url", envOr("ATLAS_ORCHESTRATOR_URL", "http://localhost:8090"), "agent orchestrator base URL")
-	model := fs.String("model", envOr("ATLAS_INFERENCE_MODEL", "fake-model"), "model name sent to the gateway")
+	provider := fs.String("provider", envOr("ATLAS_INFERENCE_PROVIDER", "auto"), "model provider (auto, nvidia, openai, ollama, fake)")
+	apiKey := fs.String("key", envOr("ATLAS_OPENAI_API_KEY", envOr("NVIDIA_API_KEY", "")), "API key for requested model provider")
+	model := fs.String("model", envOr("ATLAS_INFERENCE_MODEL", ""), "model name sent to the gateway")
 	title := fs.String("title", "", "conversation title (chat mode)")
 	noColor := fs.Bool("no-color", false, "disable ANSI colors")
 	autoApprove := fs.Bool("auto-approve", false, "auto-approve waiting_approval agent runs")
@@ -53,11 +56,14 @@ Flags:
 Environment:
   ATLAS_GATEWAY_URL         default for -url
   ATLAS_ORCHESTRATOR_URL    default for -orch-url
+  ATLAS_INFERENCE_PROVIDER  default for -provider (auto, nvidia, openai, ollama, fake)
+  ATLAS_OPENAI_API_KEY / NVIDIA_API_KEY  default for -key
   ATLAS_INFERENCE_MODEL     default for -model
 
 Examples:
+  atlas -provider nvidia -key nvapi-xxx -model meta/llama-3.1-70b-instruct generate "hello"
+  atlas -provider auto generate "hello"
   atlas run "calculate 2+2 and summarize"
-  atlas run -auto-approve "danger echo ship it"
   atlas generate "hello from the CLI"
   atlas -stream generate "stream this reply"
   atlas health
@@ -97,7 +103,7 @@ Examples:
 			return 2
 		}
 		printBanner(os.Stdout, *baseURL, *model, color)
-		return cmdGenerate(ctx, client, *model, msg, color, *stream)
+		return cmdGenerate(ctx, client, *provider, *apiKey, *model, msg, color, *stream)
 	case "run", "agent", "goal":
 		goal := strings.TrimSpace(strings.Join(rest, " "))
 		if goal == "" {
@@ -122,7 +128,7 @@ Examples:
 		return cmdOpenAPI(ctx, client, color)
 	case "chat", "c", "console", "repl":
 		printBanner(os.Stdout, *baseURL, *model, color)
-		if err := runChat(ctx, client, *model, *title, color); err != nil {
+		if err := runChat(ctx, client, *provider, *apiKey, *model, *title, color); err != nil {
 			fmt.Fprintln(os.Stderr, colorize(color, red, "error: "+err.Error()))
 			return 1
 		}
@@ -158,9 +164,13 @@ func cmdHealth(ctx context.Context, client *Client, color bool) int {
 	return 0
 }
 
-func cmdGenerate(ctx context.Context, client *Client, model, msg string, color bool, stream bool) int {
+var brailleSpinner = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func cmdGenerate(ctx context.Context, client *Client, provider, apiKey, model, msg string, color bool, stream bool) int {
 	req := GenerateRequest{
 		Messages:  []Message{{Role: "user", Content: msg}},
+		Provider:  provider,
+		APIKey:    apiKey,
 		Model:     model,
 		TaskClass: "act",
 	}
@@ -178,8 +188,24 @@ func cmdGenerate(ctx context.Context, client *Client, model, msg string, color b
 		})
 		fmt.Fprintln(os.Stdout)
 	} else {
-		fmt.Fprintln(os.Stdout, colorize(color, dim, "  … thinking"))
+		done := make(chan struct{})
+		go func() {
+			i := 0
+			for {
+				select {
+				case <-done:
+					fmt.Fprint(os.Stdout, "\r\033[K")
+					return
+				default:
+					frame := brailleSpinner[i%len(brailleSpinner)]
+					fmt.Fprintf(os.Stdout, "\r  %s %s", colorize(color, cyan, frame), colorize(color, dim, "generating output…"))
+					time.Sleep(80 * time.Millisecond)
+					i++
+				}
+			}
+		}()
 		result, err = client.Generate(ctx, req)
+		close(done)
 		if err == nil {
 			fmt.Fprintln(os.Stdout)
 			fmt.Fprintln(os.Stdout, colorize(color, bold+magenta, "atlas ›"))

@@ -79,31 +79,62 @@ func main() {
 			}
 		}
 	}
+	var promptReg *orchestrator.PromptRegistry
+	var promptStore orchestrator.PromptStore = orchestrator.NewMemoryPromptStore()
 	if promptDir != "" {
-		if reg, err := orchestrator.LoadPromptDir(promptDir); err != nil {
+		reg, err := orchestrator.LoadPromptDir(promptDir)
+		if err != nil {
 			log.Printf("prompt registry unavailable (%s): %v", promptDir, err)
 		} else {
-			planner = planner.WithPrompts(reg)
-			log.Printf("prompt registry: %s", promptDir)
+			promptReg = reg
+			log.Printf("prompt registry: %s (file hot-reload via Reload)", promptDir)
 		}
 	}
+	if dbURL != "" {
+		if ps, err := orchestrator.OpenPostgresPromptStore(ctx, dbURL); err != nil {
+			log.Printf("prompt postgres publish path unavailable: %v", err)
+		} else {
+			promptStore = ps
+			if promptReg == nil {
+				promptReg = orchestrator.NewPromptRegistry(ps)
+			} else {
+				promptReg = promptReg.WithStore(ps)
+			}
+			if err := promptReg.LoadFromStore(ctx); err != nil {
+				log.Printf("prompt load from postgres: %v", err)
+			} else {
+				log.Printf("prompt registry: postgres publish path enabled")
+			}
+		}
+	} else if promptReg != nil {
+		promptReg = promptReg.WithStore(promptStore)
+	} else {
+		promptReg = orchestrator.NewPromptRegistry(promptStore)
+	}
+	if promptReg != nil {
+		planner = planner.WithPrompts(promptReg)
+	}
+	tools := orchestrator.DefaultToolRegistry()
+	_ = orchestrator.RegisterIntegrationTools(tools, envOr("ATLAS_GITHUB_API_URL", ""), envOr("ATLAS_SLACK_API_URL", ""))
 	svc := orchestrator.NewService(orchestrator.ServiceConfig{
 		Store:       store,
 		Gateway:     gateway,
 		Builder:     orchestrator.NewContextBuilder(),
-		Tools:       orchestrator.DefaultToolRegistry(),
+		Tools:       tools,
 		Memory:      mem,
 		Retriever:   retriever,
+		Prompts:     promptStore,
+		PromptReg:   promptReg,
 		Planner:     planner,
 		Model:       model,
 		TokenBudget: 512,
 		WorkspaceID: workspace,
 	})
 	handler := &orchestrator.Handler{Service: svc}
-	// Light workspace isolation when required.
+	// Light workspace isolation when required (shared middleware; unit-tested in package).
 	var h http.Handler = handler
 	if envOr("ATLAS_REQUIRE_WORKSPACE", "") == "1" {
-		h = requireWorkspace(handler)
+		h = orchestrator.RequireWorkspace(handler)
 	}
 	server := &http.Server{Addr: addr, Handler: h}
 
@@ -129,20 +160,6 @@ func main() {
 	if redisMem != nil {
 		_ = redisMem.Close()
 	}
-}
-
-func requireWorkspace(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if strings.TrimSpace(r.Header.Get("X-Workspace-ID")) == "" {
-			http.Error(w, `{"error":"X-Workspace-ID required"}`, http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func envOr(k, d string) string {

@@ -60,7 +60,8 @@ func main() {
 			log.Fatal(err)
 		}
 	}
-	router := inference.StaticRouter{
+	router := inference.DynamicRouter{
+		Config:  config,
 		Default: inference.Route{Provider: retryingProvider, DefaultModel: config.ModelName},
 		Routes: map[string]inference.Route{
 			"plan": {Provider: retryingProvider, DefaultModel: config.ModelName},

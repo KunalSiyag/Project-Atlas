@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // PromptVar declares a template variable.
@@ -20,6 +22,8 @@ type PromptVar struct {
 
 // PromptEntry is one versioned prompt template.
 type PromptEntry struct {
+	// WorkspaceID scopes multi-tenant publish (empty treated as "default" on store).
+	WorkspaceID  string      `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
 	ID           string      `json:"id" yaml:"id"`
 	Version      string      `json:"version" yaml:"version"`
 	Status       string      `json:"status" yaml:"status"` // draft | active | retired
@@ -30,25 +34,190 @@ type PromptEntry struct {
 }
 
 // PromptRegistry is an in-memory index of loaded prompt entries.
+// Supports file hot-reload (Reload) and optional PromptStore publish/load.
+// Multi-tenant isolation for admin HTTP uses PromptStore with workspace keys.
 type PromptRegistry struct {
+	mu sync.RWMutex
 	// byID maps id -> all versions (any status)
-	byID map[string][]PromptEntry
+	byID  map[string][]PromptEntry
+	dir   string      // source directory for Reload; empty if not file-backed
+	store PromptStore // optional durable publish path
+	// publishWorkspace is the default workspace for Publish/LoadFromStore (default "default").
+	publishWorkspace string
+}
+
+// NewPromptRegistry returns an empty registry (optionally with a store for publish).
+func NewPromptRegistry(store PromptStore) *PromptRegistry {
+	return &PromptRegistry{byID: make(map[string][]PromptEntry), store: store}
+}
+
+// WithStore attaches or replaces the durable prompt store used by Publish/LoadFromStore.
+func (r *PromptRegistry) WithStore(store PromptStore) *PromptRegistry {
+	if r == nil {
+		return NewPromptRegistry(store)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.store = store
+	return r
 }
 
 // LoadPromptDir walks dir for .json and .yaml/.yml prompt files.
 func LoadPromptDir(dir string) (*PromptRegistry, error) {
-	reg := &PromptRegistry{byID: make(map[string][]PromptEntry)}
-	if strings.TrimSpace(dir) == "" {
+	reg := &PromptRegistry{byID: make(map[string][]PromptEntry), dir: strings.TrimSpace(dir)}
+	if reg.dir == "" {
 		return nil, fmt.Errorf("prompt dir is required")
 	}
-	info, err := os.Stat(dir)
-	if err != nil {
+	if err := reg.loadDirLocked(reg.dir); err != nil {
 		return nil, err
 	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("prompt path is not a directory: %s", dir)
+	return reg, nil
+}
+
+// WithPublishWorkspace sets the workspace used by Publish/LoadFromStore/Reload store merge.
+func (r *PromptRegistry) WithPublishWorkspace(workspaceID string) *PromptRegistry {
+	if r == nil {
+		return nil
 	}
-	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.publishWorkspace = NormalizeWorkspace(workspaceID)
+	return r
+}
+
+func (r *PromptRegistry) storeWorkspace() string {
+	if r == nil || r.publishWorkspace == "" {
+		return "default"
+	}
+	return r.publishWorkspace
+}
+
+// Reload re-reads the file-backed prompt directory (hot-reload without process restart)
+// and re-merges any attached store for the publish workspace. Resolve sees the new contents immediately.
+func (r *PromptRegistry) Reload() error {
+	if r == nil {
+		return fmt.Errorf("prompt registry is nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.dir == "" {
+		return fmt.Errorf("prompt registry has no file directory to reload")
+	}
+	r.byID = make(map[string][]PromptEntry)
+	if err := r.loadDirLocked(r.dir); err != nil {
+		return err
+	}
+	if r.store != nil {
+		ws := r.publishWorkspace
+		if ws == "" {
+			ws = "default"
+		}
+		entries, err := r.store.List(context.Background(), ws)
+		if err != nil {
+			return fmt.Errorf("reload store: %w", err)
+		}
+		for _, e := range entries {
+			r.upsertLocked(e)
+		}
+	}
+	return nil
+}
+
+// Publish stores entry via PromptStore (required) and merges it into the in-memory index
+// so Resolve works without restart. Same id/version keys as file prompts within the workspace.
+func (r *PromptRegistry) Publish(ctx context.Context, entry PromptEntry) error {
+	if r == nil {
+		return fmt.Errorf("prompt registry is nil")
+	}
+	if strings.TrimSpace(entry.ID) == "" {
+		return fmt.Errorf("prompt id is required")
+	}
+	if entry.Version == "" {
+		entry.Version = "0"
+	}
+	if entry.Status == "" {
+		entry.Status = "active"
+	}
+	if strings.TrimSpace(entry.Text) == "" {
+		return fmt.Errorf("prompt text is required")
+	}
+	r.mu.Lock()
+	store := r.store
+	ws := r.publishWorkspace
+	r.mu.Unlock()
+	if store == nil {
+		return fmt.Errorf("prompt store not configured")
+	}
+	if entry.WorkspaceID != "" {
+		ws = entry.WorkspaceID
+	}
+	if ws == "" {
+		ws = "default"
+	}
+	if err := store.Publish(ctx, ws, entry); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.upsertLocked(entry)
+	return nil
+}
+
+// LoadFromStore loads published prompts for the publish workspace into the index.
+func (r *PromptRegistry) LoadFromStore(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("prompt registry is nil")
+	}
+	r.mu.Lock()
+	store := r.store
+	ws := r.publishWorkspace
+	r.mu.Unlock()
+	if store == nil {
+		return fmt.Errorf("prompt store not configured")
+	}
+	if ws == "" {
+		ws = "default"
+	}
+	entries, err := store.List(ctx, ws)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range entries {
+		r.upsertLocked(e)
+	}
+	return nil
+}
+
+func (r *PromptRegistry) upsertLocked(entry PromptEntry) {
+	if r.byID == nil {
+		r.byID = make(map[string][]PromptEntry)
+	}
+	list := r.byID[entry.ID]
+	for i, e := range list {
+		if e.Version == entry.Version {
+			list[i] = entry
+			r.byID[entry.ID] = list
+			return
+		}
+	}
+	r.byID[entry.ID] = append(list, entry)
+}
+
+// loadDirLocked reads prompt files into byID. Caller must hold mu (or be sole owner during construction).
+func (r *PromptRegistry) loadDirLocked(dir string) error {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("prompt path is not a directory: %s", dir)
+	}
+	if r.byID == nil {
+		r.byID = make(map[string][]PromptEntry)
+	}
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -74,13 +243,9 @@ func LoadPromptDir(dir string) (*PromptRegistry, error) {
 		if entry.Status == "" {
 			entry.Status = "active"
 		}
-		reg.byID[entry.ID] = append(reg.byID[entry.ID], entry)
+		r.upsertLocked(entry)
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return reg, nil
 }
 
 func loadPromptFile(path string) (PromptEntry, error) {
@@ -179,6 +344,8 @@ func (r *PromptRegistry) Resolve(id, version string) (PromptEntry, error) {
 	if r == nil {
 		return PromptEntry{}, fmt.Errorf("prompt registry is nil")
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	list := r.byID[id]
 	if len(list) == 0 {
 		return PromptEntry{}, fmt.Errorf("prompt %q not found", id)

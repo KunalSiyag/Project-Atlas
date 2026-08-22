@@ -209,7 +209,10 @@ func (e *Executor) execTool(ctx context.Context, run Run, step *Step) (string, e
 	if needsApproval && !step.Approved {
 		return "", ErrWaitingApproval
 	}
-	return e.Tools.Invoke(ctx, step.ToolName, step.ToolInput, InvokeOptions{Approved: true})
+	return e.Tools.Invoke(ctx, step.ToolName, step.ToolInput, InvokeOptions{
+		Approved:    true,
+		WorkspaceID: e.workspace(),
+	})
 }
 
 func (e *Executor) execContext(ctx context.Context, run Run) (string, error) {

@@ -20,3 +20,15 @@ services:
       postgres:
         condition: service_healthy
     # Ollama is optional for the fake path; do not block gateway startup on it.
+
+  agent-orchestrator:
+    environment:
+      ATLAS_INFERENCE_MODEL: fake-model
+      # Long-term memory + run store always use Compose Postgres (same URL as gateway).
+      ATLAS_ORCHESTRATOR_DATABASE_URL: postgres://atlas:atlas-dev-password@postgres:5432/atlas?sslmode=disable
+      ATLAS_DATABASE_URL: postgres://atlas:atlas-dev-password@postgres:5432/atlas?sslmode=disable
+    depends_on:
+      inference-gateway:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy

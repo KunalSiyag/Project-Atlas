@@ -12,7 +12,10 @@ type Handler struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Optional workspace isolation: require X-Workspace-ID when ATLAS_REQUIRE_WORKSPACE=1 is set by main via middleware — handled here lightly.
+	if r.Method == http.MethodGet && isOpenAPIPath(r.URL.Path) {
+		writeOpenAPI(w)
+		return
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/healthz" {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "agent-orchestrator"})
 		return
@@ -23,6 +26,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "service": "agent-orchestrator"})
+		return
+	}
+	// Prompt admin (multi-tenant publish workflows)
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/prompts" {
+		h.publishPrompt(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/prompts" {
+		h.listPrompts(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/prompts/") {
+		h.getPrompt(w, r)
+		return
+	}
+	// Plugin marketplace/catalog (HTTP remote descriptors; not WASM)
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/plugins" {
+		h.listPlugins(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/plugins" {
+		h.registerPlugin(w, r)
+		return
+	}
+	// Knowledge corpus ops
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/knowledge/docs" {
+		h.listDocs(w, r)
+		return
+	}
+	if r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/knowledge/docs/") {
+		h.deleteDoc(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/knowledge/status" {
+		h.knowledgeStatus(w, r)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/v1/knowledge/search" {
+		h.searchKnowledge(w, r)
 		return
 	}
 	if r.Method == http.MethodPost && r.URL.Path == "/v1/runs" {
@@ -51,6 +93,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/runs/") && strings.HasSuffix(r.URL.Path, "/reject") {
 		h.rejectRun(w, r)
+		return
+	}
+	// List events before bare get-run (both are GET under /v1/runs/).
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/runs/") && strings.HasSuffix(r.URL.Path, "/events") {
+		h.listEvents(w, r)
 		return
 	}
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/runs/") {
@@ -91,6 +138,27 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
+	if h.Service == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "not_ready"})
+		return
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/runs/"), "/events")
+	if id == "" || strings.Contains(id, "/") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "run id required"})
+		return
+	}
+	events, err := h.Service.ListEvents(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return
+	}
+	if events == nil {
+		events = []Event{}
+	}
+	writeJSON(w, http.StatusOK, events)
 }
 
 func (h *Handler) startRun(w http.ResponseWriter, r *http.Request) {

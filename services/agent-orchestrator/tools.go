@@ -69,9 +69,30 @@ func ToolSchema(t Tool) map[string]any {
 	return t.InputSchema()
 }
 
+// ToolAuthorizer decides whether Invoke may run a tool (authz before Execute).
+// Return a *ToolError with Class ToolErrDenied (or any error) to block execution.
+type ToolAuthorizer interface {
+	Authorize(ctx context.Context, toolName string, opts InvokeOptions) error
+}
+
+// AllowlistAuthorizer allows only tools named in Allowed.
+// Empty Allowed denies all tools. Nil authorizer on the registry means allow-all.
+type AllowlistAuthorizer struct {
+	Allowed map[string]bool
+}
+
+// Authorize returns denied when the tool is not on the allowlist.
+func (a AllowlistAuthorizer) Authorize(_ context.Context, toolName string, _ InvokeOptions) error {
+	if a.Allowed == nil || !a.Allowed[toolName] {
+		return toolErrorf(ToolErrDenied, "tool %q not authorized for this caller", toolName)
+	}
+	return nil
+}
+
 // ToolRegistry maps tool name → implementation.
 type ToolRegistry struct {
 	tools map[string]Tool
+	authz ToolAuthorizer
 }
 
 func NewToolRegistry(tools ...Tool) *ToolRegistry {
@@ -84,6 +105,15 @@ func NewToolRegistry(tools ...Tool) *ToolRegistry {
 	return r
 }
 
+// WithAuthorizer sets the authz check run on every Invoke before Execute.
+func (r *ToolRegistry) WithAuthorizer(a ToolAuthorizer) *ToolRegistry {
+	if r == nil {
+		r = NewToolRegistry()
+	}
+	r.authz = a
+	return r
+}
+
 func DefaultToolRegistry() *ToolRegistry {
 	return NewToolRegistry(
 		EchoTool{},
@@ -93,7 +123,7 @@ func DefaultToolRegistry() *ToolRegistry {
 	)
 }
 
-// Register adds or replaces a tool by name.
+// Register adds or replaces a tool by name (extension point for plugins / remote tools).
 func (r *ToolRegistry) Register(t Tool) error {
 	if r == nil {
 		return errors.New("tool registry is nil")
@@ -106,6 +136,67 @@ func (r *ToolRegistry) Register(t Tool) error {
 	}
 	r.tools[t.Name()] = t
 	return nil
+}
+
+// ToolDescriptor describes a registerable non-built-in tool (HTTP remote adapter).
+// Not a WASM runtime — in-process HTTP plugin extension for M3 residual.
+type ToolDescriptor struct {
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	Kind             string         `json:"kind"` // "http" | "remote"
+	URL              string         `json:"url"`
+	RequiresApproval bool           `json:"requires_approval,omitempty"`
+	TimeoutMS        int            `json:"timeout_ms,omitempty"`
+	InputSchema      map[string]any `json:"input_schema,omitempty"`
+}
+
+// RegisterDescriptor registers a tool from a descriptor (plugin extension point).
+func (r *ToolRegistry) RegisterDescriptor(d ToolDescriptor) error {
+	tool, err := ToolFromDescriptor(d)
+	if err != nil {
+		return err
+	}
+	return r.Register(tool)
+}
+
+// ToolFromDescriptor builds a Tool from a descriptor (HTTP remote adapter).
+func ToolFromDescriptor(d ToolDescriptor) (Tool, error) {
+	name := strings.TrimSpace(d.Name)
+	if name == "" {
+		return nil, toolErrorf(ToolErrInvalidInput, "descriptor name is required")
+	}
+	kind := strings.ToLower(strings.TrimSpace(d.Kind))
+	if kind == "" {
+		kind = "http"
+	}
+	switch kind {
+	case "http", "remote":
+		if strings.TrimSpace(d.URL) == "" {
+			return nil, toolErrorf(ToolErrInvalidInput, "http tool requires url")
+		}
+		timeout := time.Duration(d.TimeoutMS) * time.Millisecond
+		if timeout <= 0 {
+			timeout = 5 * time.Second
+		}
+		schema := d.InputSchema
+		if schema == nil {
+			schema = map[string]any{
+				"required":   []string{"payload"},
+				"properties": map[string]any{"payload": map[string]any{"type": "string"}},
+			}
+		}
+		return RemoteHTTPTool{
+			ToolName:      name,
+			ToolDesc:      d.Description,
+			Endpoint:      d.URL,
+			Approval:      d.RequiresApproval,
+			ToolTimeout:   timeout,
+			Schema:        schema,
+			Client:        http.DefaultClient,
+		}, nil
+	default:
+		return nil, toolErrorf(ToolErrInvalidInput, "unsupported tool kind %q (http/remote only; no WASM)", d.Kind)
+	}
 }
 
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
@@ -134,9 +225,14 @@ type InvokeOptions struct {
 	Timeout time.Duration
 	// Approved must be true for tools with RequiresApproval.
 	Approved bool
+	// WorkspaceID is available to authorizers (caller identity context).
+	WorkspaceID string
+	// Roles optional caller roles for future policy; allowlist ignores them today.
+	Roles []string
 }
 
-// Invoke validates, enforces approval, applies timeout, and executes via the registry.
+// Invoke validates, enforces authz + approval, applies timeout, and executes via the registry.
+// Authz runs before Execute so denied tools never run their body.
 func (r *ToolRegistry) Invoke(ctx context.Context, name string, input map[string]any, opts InvokeOptions) (string, error) {
 	if r == nil {
 		return "", toolErrorf(ToolErrToolError, "tool registry not configured")
@@ -144,6 +240,15 @@ func (r *ToolRegistry) Invoke(ctx context.Context, name string, input map[string
 	tool, ok := r.Get(name)
 	if !ok {
 		return "", toolErrorf(ToolErrInvalidInput, "unknown tool %q", name)
+	}
+	if r.authz != nil {
+		if err := r.authz.Authorize(ctx, name, opts); err != nil {
+			var te *ToolError
+			if errors.As(err, &te) {
+				return "", err
+			}
+			return "", &ToolError{Class: ToolErrDenied, Message: err.Error(), Err: err}
+		}
 	}
 	if tool.RequiresApproval() && !opts.Approved {
 		return "", toolErrorf(ToolErrDenied, "tool %q requires approval", name)
@@ -386,4 +491,69 @@ func (t HTTPGetTool) Execute(ctx context.Context, input map[string]any) (string,
 		return "", err
 	}
 	return fmt.Sprintf("HTTP %d\n%s", resp.StatusCode, string(body)), nil
+}
+
+// RemoteHTTPTool is a registerable plugin tool that POSTs JSON input to a remote URL.
+// This is the non-WASM remote extension path (M3 residual / Next), not a guest runtime.
+type RemoteHTTPTool struct {
+	ToolName    string
+	ToolDesc    string
+	Endpoint    string
+	Approval    bool
+	ToolTimeout time.Duration
+	Schema      map[string]any
+	Client      *http.Client
+}
+
+func (t RemoteHTTPTool) Name() string { return t.ToolName }
+func (t RemoteHTTPTool) Description() string {
+	if t.ToolDesc != "" {
+		return t.ToolDesc
+	}
+	return "Remote HTTP tool plugin"
+}
+func (t RemoteHTTPTool) RequiresApproval() bool { return t.Approval }
+func (t RemoteHTTPTool) Timeout() time.Duration {
+	if t.ToolTimeout > 0 {
+		return t.ToolTimeout
+	}
+	return 5 * time.Second
+}
+func (t RemoteHTTPTool) InputSchema() map[string]any {
+	if t.Schema != nil {
+		return t.Schema
+	}
+	return map[string]any{}
+}
+
+func (t RemoteHTTPTool) Execute(ctx context.Context, input map[string]any) (string, error) {
+	if strings.TrimSpace(t.Endpoint) == "" {
+		return "", toolErrorf(ToolErrToolError, "remote tool endpoint empty")
+	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return "", toolErrorf(ToolErrInvalidInput, "marshal input: %v", err)
+	}
+	client := t.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", toolErrorf(ToolErrToolError, "remote tool request: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", toolErrorf(ToolErrToolError, "remote tool HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return string(raw), nil
 }

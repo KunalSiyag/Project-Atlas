@@ -15,10 +15,10 @@ Applies to repository-wide planning, documentation, architecture, and implementa
 Atlas Core Engineering
 
 ## Status
-M0 Foundation Complete · M1 runtime in progress
+M0–M1 + M2/M3 orchestrator slice shipped · M3–M5 residual / production still open
 
 ## Last Updated
-2026-08-04
+2026-08-05
 
 ## Related Documents
 - [Beginner Build Record](./docs/engineering/BEGINNER_BUILD_RECORD.md)
@@ -44,12 +44,12 @@ An enterprise-oriented **AI agent platform** (not a single chatbot demo). The LL
 ## Operating Model
 Atlas is documentation-first. Do not implement features until requirements, product design, architecture, ADRs, API contracts, data models, tasks, and test plans exist for the relevant scope.
 
-## M0 / M1 status and next steps
-- **M0 is complete:** product constitution, domain language, subsystem architecture, ADRs 0001–0008, management layer, contracts/schemas/tasks indexes.
-- **M1 advanced:** `services/inference-gateway` (fake/Ollama/OpenAI-style chat, embeddings, OTEL export none|console|otlp, Postgres optional, OpenAPI), `deploy/` Compose, `clients/atlas-cli`, root `Makefile`.
-- **Orchestrator:** plan DAG, tools+approvals, memory, light RAG, gateway calls, Postgres optional; CLI `atlas run`.
-- **Still open:** streaming SSE, eval harness, Compose Grafana/OTEL collector, enterprise auth, production RAG quality, web UI.
-- Teach-yourself path: [docs/engineering/BEGINNER_BUILD_RECORD.md](./docs/engineering/BEGINNER_BUILD_RECORD.md).
+## Status and next steps
+- **M0 is complete:** product constitution, domain language, subsystem architecture, ADRs 0001–0008 (+ later ADRs), management layer, contracts/schemas/tasks indexes.
+- **M1 largely shipped:** `services/inference-gateway` (fake/Ollama/OpenAI-style chat, embeddings, OTEL, OpenAPI), `deploy/` Compose, `clients/atlas-cli`, root `Makefile`.
+- **M2/M3 slice shipped:** agent-orchestrator (plan DAG, tools+approvals, memory/RAG ports, Postgres runs, list-events, OpenAPI), prompt registry, Tool SDK built-ins, `tools/atlas-eval`, streaming SSE and Compose OTEL/Grafana as available.
+- **Still open (not done):** M3 plugin SDK beyond in-process + tool authz; M4 corpus ops / search SLAs; M5 eval CI gates, security hardening, deploy docs, runbooks, load/bench dashboards; enterprise auth; web UI. Icebox: multi-region HA, WASM/remote plugins, multi-agent swarms.
+- Teach-yourself path: [docs/engineering/COMPLETE_BEGINNER_GUIDE.md](./docs/engineering/COMPLETE_BEGINNER_GUIDE.md) (no Go experience required).
 - Track work in [management/BACKLOG.md](./management/BACKLOG.md) and [tasks/](./tasks/README.md).
 
 ## Core Constraints

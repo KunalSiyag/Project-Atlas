@@ -73,6 +73,8 @@ type ConversationMessage struct {
 type GenerateRequest struct {
 	Messages  []Message         `json:"messages"`
 	TaskClass string            `json:"task_class,omitempty"`
+	Provider  string            `json:"provider,omitempty"`
+	APIKey    string            `json:"api_key,omitempty"`
 	Model     string            `json:"model,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	Stream    bool              `json:"stream,omitempty"`
@@ -105,6 +107,38 @@ type InferenceRunView struct {
 	ErrorMessage   string        `json:"error_message,omitempty"`
 	StartedAt      time.Time     `json:"started_at"`
 	CompletedAt    *time.Time    `json:"completed_at,omitempty"`
+}
+
+type ModelInfo struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider,omitempty"`
+}
+
+func (c *Client) ListModels(ctx context.Context, provider, apiKey string) ([]ModelInfo, error) {
+	url := fmt.Sprintf("%s/v1/models?provider=%s&api_key=%s", c.BaseURL, provider, apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("list models failed (%d)", resp.StatusCode)
+	}
+	var out struct {
+		Data []ModelInfo `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, err
+	}
+	return out.Data, nil
 }
 
 func (c *Client) Health(ctx context.Context) (string, error) {
@@ -301,9 +335,15 @@ func (c *Client) OpenAPI(ctx context.Context) (string, error) {
 	return string(body), nil
 }
 
-func (c *Client) PostMessage(ctx context.Context, conversationID, content, model, taskClass string) (GenerateResult, error) {
+func (c *Client) PostMessage(ctx context.Context, conversationID, content, provider, apiKey, model, taskClass string) (GenerateResult, error) {
 	body := map[string]any{
 		"content": content,
+	}
+	if provider != "" {
+		body["provider"] = provider
+	}
+	if apiKey != "" {
+		body["api_key"] = apiKey
 	}
 	if model != "" {
 		body["model"] = model
